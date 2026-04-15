@@ -1,6 +1,11 @@
 from django.contrib import admin
+
 from . import models
 
-# Register your models here.
-
-admin.site.register(models.Task)
+admin.site.register(models.Gym)
+admin.site.register(models.Muscle)
+admin.site.register(models.Exercise)
+admin.site.register(models.CustomExercise)
+admin.site.register(models.GymStandardExerciseVideo)
+admin.site.register(models.Routine)
+admin.site.register(models.ExerciseBlock)

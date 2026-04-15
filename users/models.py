@@ -37,7 +37,7 @@ class User(AbstractUser):
     
     # RELACIÓN N a N: Un usuario puede estar en varios gimnasios
     # y un gimnasio tiene muchos usuarios.
-    gyms = models.ManyToManyField('gyms.Gym', related_name='users', blank=True)
+    gyms = models.ManyToManyField('gym_tracker.Gym', related_name='users', blank=True)
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []

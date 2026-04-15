@@ -1,51 +1,156 @@
-from dis import stack_effect
+from django.conf import settings
 from django.db import models
-from django.contrib.auth.models import AbstractUser
 
-#modelos para cargar la base de datos, cada clase es una tabla, cada atributo es un campo de la tabla
-class Task(models.Model):
-    title = models.CharField(max_length=100)
-    description = models.TextField()
-    done = models.BooleanField(default=False)
-    
+# ----------------- GIMNASIOS  -----------------
+
+class Gym(models.Model):
+    name = models.CharField(max_length=30)
+
     def __str__(self):
-        return self.title
+        return self.name
 
 
-class Gym (models.Model):
-    name = models.CharField(max_length = 30)
 
+# ----------------- EJERCICIOS Y MÚSCULOS -----------------
 
-class User (AbstractUser):
-    class Role (models.TextChoices):
-        ADMIN = 'ADMIN', 'Gym Admin'
-        STAFF = 'STAFF', 'Staff/Trainer'
-        PERSON = 'PERSON', 'Person/Client'
-        
-    role = models.CharField(max_length = 15 , choices = Role.choices , default=Role.PERSON)
-    gyms = models.ManyToManyField(
-        'Gym', 
-        related_name='users', # Para traer todos los usuarios de un gym, los llamo con users
+class Muscle(models.Model):
+    muscle_name = models.CharField(max_length=50)
+    zone = models.CharField(max_length=50)
+
+    def __str__(self):
+        return self.muscle_name
+
+class Exercise(models.Model):
+    name = models.CharField(max_length=50)
+    description = models.TextField(max_length=200)
+
+    muscle = models.ForeignKey(
+        Muscle, 
+        on_delete=models.CASCADE, 
+        related_name='exercises', 
         blank=True,
-        help_text="Gyms of the user."
+        null=True, # Necesario si blank=True en un ForeignKey
+        help_text='Muscle of the exercise'
+    )
+
+    def __str__(self):
+        return self.name
+
+class CustomExercise(Exercise):
+    gym = models.ForeignKey(
+        Gym,
+        on_delete=models.CASCADE,
+        related_name='custom_exercises',
+        blank=True,
+        null=True,
+        help_text='Gym where the custom exercise belongs to',
+    )
+    video = models.URLField(blank=True, null=True)
+
+    def __str__(self):
+        return self.name
+
+
+class GymStandardExerciseVideo(models.Model):
+    """
+    Tabla para que cada Gym pueda ponerle su propio video 
+    explicativo a un Ejercicio Estándar global.
+    """
+    gym = models.ForeignKey(
+        Gym, 
+        on_delete=models.CASCADE, 
+        related_name='standard_exercise_videos'
+    )
+    exercise = models.ForeignKey(
+        Exercise, 
+        on_delete=models.CASCADE, 
+        related_name='gym_videos'
+    )
+    video = models.URLField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=('gym', 'exercise'),
+                name='unique_gym_standard_exercise_video',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.gym} — {self.exercise}'
+
+
+# ----------------- RUTINAS Y BLOQUES -----------------
+
+class Routine(models.Model):
+    name = models.CharField(max_length=100)
+    gym = models.ForeignKey(
+        Gym,
+        on_delete=models.CASCADE,
+        related_name='routines',
+    )
+    staff = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='staff_routines',
+        limit_choices_to={'role': 'STAFF'},
+    )
+    person = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='client_routines',
+        limit_choices_to={'role': 'PERSON'},
+    )
+
+    def __str__(self):
+        return self.name
+
+
+class ExerciseBlock(models.Model):
+    # Este bloque debe pertenecer a un día de rutina específico
+    routine = models.ForeignKey(
+        Routine, 
+        on_delete=models.CASCADE, 
+        related_name='blocks'
     )
     
-class Muscle (models.Model):
-    muscle_name = models.CharField(max_length = 50)
-    zone = models.CharField(max_length = 50)
+    exercise = models.ForeignKey(
+        Exercise, 
+        on_delete=models.CASCADE, 
+        related_name='exercise_blocks'
+    )
+    day_number = models.IntegerField()
 
-class Exercise (models.Model):
-    
-    name = models.CharField(max_length = 50)
-    muscle = models.ForeignKey('Muscle',related_name='exercises',blank=True,help_text='Muscle of the exercise');
-    
-class ExerciseBlock(models.Model):
-    Exercise = models.ForeignKey('Exercise', related_name='exercise_blocks',blank=True,help_text='Exercise of the block')
-    series_data = models.JSONField(default=list)
-    day_number = models.SmallIntegerField()
     order = models.SmallIntegerField()
-    
-    
+    series_data = models.JSONField(default=list)
 
+    class Meta:
+        ordering = ['routine', 'day_number', 'order']
+        constraints = [
+            models.UniqueConstraint(
+                fields=('routine', 'day_number', 'order'),
+                name='unique_routine_day_order_block',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(day_number__gte=1),
+                name='exerciseblock_day_number_gte_1',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(order__gte=1),
+                name='exerciseblock_order_gte_1',
+            ),
+        ]
 
+    def __str__(self):
+        return f'{self.routine} / día {self.day_number} / {self.exercise}'
+
+    # Ejemplo de lo que guardarías en series_data desde el Frontend:
+    # [
+    #   {"repe": 12, "peso": 50},
+    #   {"repe": 10, "peso": 55},
+    #   {"repe": 8, "peso": 60}
+    # ]
+    
     

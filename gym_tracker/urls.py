@@ -1,23 +1,29 @@
 from django.urls import path, include
-from . import views
 from rest_framework import routers
-
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
+from . import views
+
 router = routers.DefaultRouter()
-router.register(r'task', views.TaskViewSet, basename='task') #asi agrego las vistas
-#las rutas es api(que esta en el urls.py del proyecto) + nutri(que esta en el urls.py de la app(aca abajo)) + task(que es la ruta que se le asigno a la vista)
-#para agregar rutas es router.register(r'como sigue la ruta', views.loqueseaViewSet, basename='loquesea') 
-router.register(r'taskSave', views.TaskViewSet, basename='task')
+router.register(r'gyms', views.GymViewSet, basename='gym')
+router.register(r'muscles', views.MuscleViewSet, basename='muscle')
+router.register(r'exercises', views.ExerciseViewSet, basename='exercise')
+router.register(r'custom-exercises', views.CustomExerciseViewSet, basename='custom-exercise')
+router.register(
+    r'gym-standard-exercise-videos',
+    views.GymStandardExerciseVideoViewSet,
+    basename='gym-standard-exercise-video',
+)
+router.register(r'routines', views.RoutineViewSet, basename='routine')
 
 urlpatterns = [
+    # 1. Rutas personalizadas PRIMERO (para que el router no las pise)
+    path('routines/all/', views.GetAllRoutinesView.as_view(), name='get_all_routines'),
+    
+    # 2. Rutas generadas por el Router
     path('', include(router.urls)),
     
-    
-    
-    # Para la documentación de la API, agregamos dos rutas:
+    # 3. Documentación Swagger (drf-spectacular)
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
-    
-    # La ruta para la interfaz de usuario de Swagger, que consume el esquema generado por la ruta anterior.
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
 ]
