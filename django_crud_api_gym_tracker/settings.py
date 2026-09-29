@@ -28,6 +28,10 @@ def env_list(name, default):
     return [item.strip() for item in os.environ.get(name, default).split(',') if item.strip()]
 
 
+def env_bool(name, default):
+    return os.environ.get(name, default).lower() in ('1', 'true', 'yes')
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
@@ -35,9 +39,22 @@ def env_list(name, default):
 SECRET_KEY = os.environ['DJANGO_SECRET_KEY']
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DJANGO_DEBUG', 'False').lower() in ('1', 'true', 'yes')
+DEBUG = env_bool('DJANGO_DEBUG', 'False')
 
 ALLOWED_HOSTS = env_list('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1')
+
+# Orígenes HTTPS desde los que se aceptan formularios con sesión (ej. el admin detrás de un dominio)
+CSRF_TRUSTED_ORIGINS = env_list('DJANGO_CSRF_TRUSTED_ORIGINS', '')
+
+# Producción (DJANGO_DEBUG=False): cookies seguras, HTTPS obligatorio y HSTS
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = env_bool('DJANGO_SSL_REDIRECT', 'True')
+    SECURE_HSTS_SECONDS = int(os.environ.get('DJANGO_HSTS_SECONDS', str(60 * 60 * 24 * 30)))
+    # Si un proxy (Nginx, la plataforma de hosting...) termina el HTTPS y avisa con X-Forwarded-Proto
+    if env_bool('DJANGO_BEHIND_PROXY', 'False'):
+        SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 
 # Application definition
@@ -126,7 +143,8 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+# Los mensajes propios de la API están en español: los de Django y DRF también
+LANGUAGE_CODE = 'es'
 
 TIME_ZONE = 'UTC'
 
@@ -139,6 +157,8 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+# `python manage.py collectstatic` junta acá los archivos del admin y de Swagger para servirlos
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

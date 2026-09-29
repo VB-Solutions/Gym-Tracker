@@ -1,0 +1,39 @@
+name: Backend
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['client/**', '**.md']
+  pull_request:
+    paths-ignore: ['client/**', '**.md']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # Solo para CI: no es un secreto de ningún entorno real
+      DJANGO_SECRET_KEY: ci-only-insecure-key-used-to-run-the-test-suite
+      # Con DEBUG=False se activa la redirección a HTTPS y el cliente de tests recibiría 301
+      DJANGO_DEBUG: 'True'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: System check
+        run: python manage.py check
+
+      - name: Migraciones al día con los modelos
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Schema OpenAPI válido
+        run: python manage.py spectacular --validate --fail-on-warn --file schema.yml
+
+      - name: Tests
+        run: python manage.py test
