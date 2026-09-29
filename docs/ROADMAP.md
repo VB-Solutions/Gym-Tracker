@@ -1,6 +1,6 @@
 # Estado actual y roadmap
 
-Última revisión: 29/09/2026, después de completar el roadmap del backend (rama `feat/backend-roadmap`).
+Última revisión: 29/09/2026, después de preparar el deploy en Coolify (rama `coolify-test`).
 
 ## Resumen
 
@@ -10,7 +10,11 @@
   - Ejercicios estándar y propios, videos, y rutinas con sus bloques de ejercicios.
   - Tests y CI en GitHub Actions.
 - **El frontend sigue siendo solo pantallas estáticas.** Conectarlo a la API es lo principal que falta (P0).
-- **Falta definir dónde se despliega.** Con eso se sigue con PostgreSQL y el servidor de producción (P1).
+- **El deploy está listo para Coolify** ([docs/DEPLOY.md](DEPLOY.md)):
+  - API con gunicorn y PostgreSQL.
+  - Web con nginx.
+  - Health checks en las dos imágenes.
+  - Tests en CI contra PostgreSQL.
 
 ## Estado actual
 
@@ -85,7 +89,7 @@ Además, públicos:
 
 ### Calidad
 
-- **67 tests** en `gym_tracker/tests.py` y `users/tests.py`. Cubren:
+- **70 tests** en `gym_tracker/tests.py`, `users/tests.py` y `django_crud_api_gym_tracker/tests.py`. Pasan con SQLite y con PostgreSQL. Cubren:
   - permisos por rol y por gimnasio;
   - el flujo JWT y el throttling;
   - la gestión de miembros;
@@ -93,7 +97,9 @@ Además, públicos:
   - que la cantidad de queries de las rutinas no crezca;
   - las migraciones con datos (`users.0002` y `gym_tracker.0010`);
   - el admin de usuarios.
-- **CI en GitHub Actions:** system check, migraciones pendientes, schema OpenAPI y tests.
+- **CI en GitHub Actions:**
+  - `backend.yml`: system check, migraciones pendientes, schema OpenAPI y tests contra PostgreSQL.
+  - `docker.yml`: build de las dos imágenes.
 - **Producción:** `check --deploy` solo marca W005 y W021 (HSTS para subdominios y preload). Quedan apagados a propósito hasta conocer el dominio.
 
 ### Frontend
@@ -126,10 +132,9 @@ Además, públicos:
 ### P1: despliegue y backend pendiente
 
 **Despliegue**
-- Elegir el hosting.
-- Pasar a PostgreSQL: `psycopg` más configuración por variable de entorno, por ejemplo `DATABASE_URL`.
-- Servidor WSGI (gunicorn) y archivos estáticos (`collectstatic`, o whitenoise).
-- Decidir `SECURE_HSTS_INCLUDE_SUBDOMAINS` y `SECURE_HSTS_PRELOAD` según el dominio.
+- **Hacer el primer deploy en Coolify** siguiendo [DEPLOY.md](DEPLOY.md), y configurar los backups de PostgreSQL.
+- **Decidir HSTS** (`SECURE_HSTS_INCLUDE_SUBDOMAINS` y `SECURE_HSTS_PRELOAD`) cuando esté el dominio definitivo.
+- **Cache compartido.** El throttling de login y registro se guarda en la memoria de cada proceso de gunicorn, así que el límite real se multiplica por la cantidad de procesos. Pasar a un cache compartido: Redis como recurso de Coolify, o el cache en base de datos de Django.
 
 **Auth y cuentas**
 - **Logout real.** Hoy el cliente descarta los tokens, pero el refresh sigue valiendo hasta que vence. Se resuelve con la app `token_blacklist` de SimpleJWT.
@@ -198,3 +203,12 @@ Además, públicos:
   - Mensajes en español.
   - Settings de producción.
   - CI.
+
+**Rama `coolify-test`**
+- **Imágenes Docker:**
+  - API: gunicorn, whitenoise, migraciones al arrancar y `HEALTHCHECK` en `/health/`.
+  - Web: nginx con fallback de SPA.
+- **PostgreSQL** por `DATABASE_URL`, con SQLite en desarrollo.
+- **Logs de errores** a la consola.
+- **CI** con PostgreSQL y build de las dos imágenes.
+- **Guía de deploy** en Coolify.

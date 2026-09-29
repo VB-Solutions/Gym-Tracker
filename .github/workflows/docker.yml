@@ -1,0 +1,23 @@
+name: Docker
+
+# Verifica que las imágenes que construye Coolify sigan compilando (no publica nada)
+on:
+  push:
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: api
+            context: .
+          - name: web
+            context: client
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.name }}
+        run: docker build -t gym-${{ matrix.name }}:ci ${{ matrix.context }}

@@ -107,7 +107,12 @@ En GitHub Actions (`.github/workflows/backend.yml`) corren en cada push a `main`
 
 ### Producción
 
-Con `DJANGO_DEBUG=False` se activan las cookies seguras, la redirección a HTTPS y HSTS. Las variables están documentadas en `.env.example`. Antes de desplegar, correr `python manage.py check --deploy` y `python manage.py collectstatic`.
+La API y la web se despliegan en **Coolify**, con PostgreSQL. El paso a paso está en [docs/DEPLOY.md](docs/DEPLOY.md).
+
+- **Imágenes:** una para la API (`Dockerfile`, gunicorn con whitenoise para los estáticos) y otra para la web (`client/Dockerfile`, nginx).
+- **Arranque:** el contenedor de la API aplica las migraciones al iniciar.
+- **Modo producción:** con `DJANGO_DEBUG=False` se activan las cookies seguras, la redirección a HTTPS y HSTS.
+- **Variables:** están documentadas en `.env.example`.
 
 ## Frontend
 
