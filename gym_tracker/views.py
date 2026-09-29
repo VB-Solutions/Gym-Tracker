@@ -1,15 +1,13 @@
-from rest_framework import viewsets , permissions , generics
-from rest_framework.decorators import api_view,permission_classes
+from rest_framework import viewsets, generics
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied, ValidationError
-from .permissions import IsStaffRole, IsAdminRole , IsPersonRole
+from .permissions import IsStaffRole, IsAdminRole
 from .utils import get_gym_id_param
 from django.db.models import Q
 
 from .models import (
     CustomExercise,
     Exercise,
-    ExerciseBlock,
     Gym,
     GymStandardExerciseVideo,
     Muscle,
@@ -17,15 +15,12 @@ from .models import (
 )
 from .serializer import (
     CustomExerciseSerializer,
-    #ExerciseBlockSerializer,
     ExerciseSerializer,
     GymSerializer,
     GymStandardExerciseVideoSerializer,
     MuscleSerializer,
     RoutineSerializer,
     RoutineDetailSerializer,
-    ExerciseBlockDetailSerializer,
-    ExerciseInBlockSerializer
 )
 
 

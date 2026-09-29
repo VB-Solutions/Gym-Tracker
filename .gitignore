@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Django
+.env
+db.sqlite3
+db.sqlite3-journal
+/staticfiles/
+/media/
+
+# Node (the frontend lives in client/, which has its own .gitignore)
+node_modules/
+dist/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
