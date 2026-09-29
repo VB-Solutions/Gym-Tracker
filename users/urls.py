@@ -7,6 +7,7 @@ router = routers.SimpleRouter()
 router.register(r'admins', views.GymAdminViewSet, basename='gym-admin')
 router.register(r'staff', views.StaffMemberViewSet, basename='gym-staff')
 router.register(r'people', views.PersonViewSet, basename='gym-person')
+router.register(r'memberships', views.GymMembershipViewSet, basename='gym-membership')
 
 urlpatterns = [
     # Autenticación

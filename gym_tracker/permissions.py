@@ -21,15 +21,25 @@ class IsGymStaffOrAdminOrReadOnly(permissions.BasePermission):
         return request.user.has_gym_role(obj.gym_id, Role.STAFF, Role.ADMIN)
 
 
-class IsStaffOrAdminInAnyGym(permissions.BasePermission):
-    """El usuario es STAFF o ADMIN en al menos un gimnasio."""
-    message = "Solo STAFF o ADMIN pueden acceder a este recurso."
+class _HasRoleInAnyGym(permissions.BasePermission):
+    """El usuario tiene alguno de `roles` en al menos un gimnasio."""
+    roles = ()
 
     def has_permission(self, request, view):
         return bool(
             request.user
             and request.user.is_authenticated
-            and request.user.memberships.filter(role__in=[Role.STAFF, Role.ADMIN]).exists()
+            and request.user.memberships.filter(role__in=self.roles).exists()
         )
+
+
+class IsStaffOrAdminInAnyGym(_HasRoleInAnyGym):
+    roles = (Role.STAFF, Role.ADMIN)
+    message = "Solo STAFF o ADMIN pueden acceder a este recurso."
+
+
+class IsAdminInAnyGym(_HasRoleInAnyGym):
+    roles = (Role.ADMIN,)
+    message = "Solo un ADMIN de gimnasio puede acceder a este recurso."
 
 '-----------------------------------'

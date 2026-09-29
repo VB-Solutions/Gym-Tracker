@@ -185,6 +185,109 @@ class AuthTests(APITestCase):
         self.assertEqual(self._login().status_code, status.HTTP_429_TOO_MANY_REQUESTS)
 
 
+class GymMembershipManagementTests(APITestCase):
+    def setUp(self):
+        self.gym = Gym.objects.create(name='Gym Centro')
+        self.other_gym = Gym.objects.create(name='Gym Ajeno')
+
+        self.admin = self._create_user('admin@test.com', Role.ADMIN, self.gym)
+        self.staff = self._create_user('staff@test.com', Role.STAFF, self.gym)
+        self.foreign_admin = self._create_user('admin-ajeno@test.com', Role.ADMIN, self.other_gym)
+        self.registered = self._create_user('nuevo@test.com')
+
+    def _create_user(self, email, role=None, *gyms):
+        user = User.objects.create_user(email=email, password='pass1234')
+        for gym in gyms:
+            GymMembership.objects.create(user=user, gym=gym, role=role)
+        return user
+
+    def _add(self, email='nuevo@test.com', role=Role.STAFF, gym=None):
+        return self.client.post(reverse('gym-membership-list'), {
+            'gym': (gym or self.gym).id, 'email': email, 'role': role,
+        })
+
+    def _membership(self, user):
+        return GymMembership.objects.get(user=user, gym=self.gym)
+
+    def test_admin_adds_registered_user_by_email(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self._add(email='NUEVO@test.com')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['user']['email'], 'nuevo@test.com')
+        self.assertEqual(self.registered.role_in(self.gym), Role.STAFF)
+
+    def test_adding_unknown_email_returns_400(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self._add(email='nadie@test.com')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('email', response.data)
+
+    def test_adding_existing_member_returns_400(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self._add(email='staff@test.com')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_admin_of_another_gym_cannot_add_members(self):
+        self.client.force_authenticate(self.foreign_admin)
+
+        response = self._add(gym=self.gym)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_staff_cannot_manage_memberships(self):
+        self.client.force_authenticate(self.staff)
+
+        self.assertEqual(self.client.get(reverse('gym-membership-list')).status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(self._add().status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_only_lists_own_gyms(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(reverse('gym-membership-list'))
+
+        self.assertEqual(
+            {membership['user']['email'] for membership in response.data},
+            {'admin@test.com', 'staff@test.com'},
+        )
+
+    def test_admin_changes_role(self):
+        self.client.force_authenticate(self.admin)
+        membership = self._membership(self.staff)
+
+        response = self.client.patch(
+            reverse('gym-membership-detail', args=[membership.id]),
+            {'role': Role.ADMIN, 'gym': self.other_gym.id},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        membership.refresh_from_db()
+        self.assertEqual(membership.role, Role.ADMIN)
+        self.assertEqual(membership.gym, self.gym)
+
+    def test_admin_removes_member(self):
+        self.client.force_authenticate(self.admin)
+        membership = self._membership(self.staff)
+
+        response = self.client.delete(reverse('gym-membership-detail', args=[membership.id]))
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertIsNone(self.staff.role_in(self.gym))
+
+    def test_gym_always_keeps_an_admin(self):
+        self.client.force_authenticate(self.admin)
+        url = reverse('gym-membership-detail', args=[self._membership(self.admin).id])
+
+        self.assertEqual(self.client.patch(url, {'role': Role.STAFF}).status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(self.client.delete(url).status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(self.admin.role_in(self.gym), Role.ADMIN)
+
+
 class UserAdminTests(APITestCase):
     def setUp(self):
         self.superuser = User.objects.create_superuser(email='root@test.com', password='pass1234')
