@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -51,6 +52,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'drf_spectacular',
     'rest_framework',
+    'rest_framework_simplejwt',
 
     'gym_tracker',
     'users',
@@ -146,4 +148,20 @@ AUTH_USER_MODEL = 'users.User'
 
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        # El frontend manda `Authorization: Bearer <access>` (ver /users/auth/login/)
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        # Para usar la API navegable y Swagger después de iniciar sesión en /admin/
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    # Todo requiere estar autenticado salvo que la View diga lo contrario (login, registro, docs)
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    # Solo limita las Views que declaran `throttle_scope` (login, refresh y registro)
+    "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.ScopedRateThrottle"],
+    "DEFAULT_THROTTLE_RATES": {"auth": "20/min"},
+}
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
 }

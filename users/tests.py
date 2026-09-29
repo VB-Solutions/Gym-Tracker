@@ -1,3 +1,4 @@
+from django.core.cache import cache
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
@@ -90,6 +91,98 @@ class GymScopedUserEndpointsTests(APITestCase):
         response = self.client.get(reverse('gym-person-list'), {'gym': self.other_gym.id})
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class AuthTests(APITestCase):
+    """Flujo real con JWT (sin force_authenticate)."""
+
+    def setUp(self):
+        cache.clear()  # el throttling guarda los contadores en el cache
+        self.gym = Gym.objects.create(name='Gym Centro')
+        self.user = User.objects.create_user(email='socio@test.com', password='Clave-segura-123')
+        GymMembership.objects.create(user=self.user, gym=self.gym, role=Role.PERSON)
+
+    def _login(self, email='socio@test.com', password='Clave-segura-123'):
+        return self.client.post(reverse('auth-login'), {'email': email, 'password': password})
+
+    def test_register_creates_user_without_gyms(self):
+        response = self.client.post(reverse('auth-register'), {
+            'email': 'nuevo@test.com',
+            'password': 'Clave-segura-123',
+            'first_name': 'Ana',
+            'last_name': 'Pérez',
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['email'], 'nuevo@test.com')
+        self.assertEqual(response.data['gyms'], [])
+        self.assertNotIn('password', response.data)
+        self.assertTrue(User.objects.get(email='nuevo@test.com').check_password('Clave-segura-123'))
+
+    def test_register_rejects_duplicate_email_ignoring_case(self):
+        response = self.client.post(reverse('auth-register'), {
+            'email': 'SOCIO@test.com',
+            'password': 'Clave-segura-123',
+            'first_name': 'Ana',
+            'last_name': 'Pérez',
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('email', response.data)
+
+    def test_register_rejects_weak_password(self):
+        response = self.client.post(reverse('auth-register'), {
+            'email': 'nuevo@test.com',
+            'password': '1234',
+            'first_name': 'Ana',
+            'last_name': 'Pérez',
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('password', response.data)
+
+    def test_login_returns_tokens_that_authenticate(self):
+        response = self._login()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access']}")
+        me = self.client.get(reverse('me'))
+
+        self.assertEqual(me.status_code, status.HTTP_200_OK)
+        self.assertEqual(me.data['email'], 'socio@test.com')
+        self.assertEqual(me.data['gyms'], [{'id': self.gym.id, 'name': 'Gym Centro', 'role': Role.PERSON}])
+
+    def test_login_with_wrong_password_returns_401(self):
+        self.assertEqual(self._login(password='otra').status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_refresh_returns_new_access_token(self):
+        refresh = self._login().data['refresh']
+
+        response = self.client.post(reverse('auth-refresh'), {'refresh': refresh})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('access', response.data)
+
+    def test_me_can_edit_name_but_not_email(self):
+        self.client.force_authenticate(self.user)
+
+        response = self.client.patch(reverse('me'), {'first_name': 'Juan', 'email': 'otro@test.com'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, 'Juan')
+        self.assertEqual(self.user.email, 'socio@test.com')
+
+    def test_protected_endpoints_require_a_token(self):
+        response = self.client.get(reverse('me'))
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_login_is_throttled(self):
+        for _ in range(20):
+            self._login(password='otra')
+
+        self.assertEqual(self._login().status_code, status.HTTP_429_TOO_MANY_REQUESTS)
 
 
 class UserAdminTests(APITestCase):

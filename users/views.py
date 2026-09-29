@@ -1,13 +1,72 @@
 from django.db.models import Prefetch
-from rest_framework import viewsets
+from rest_framework import generics, status, viewsets
 from rest_framework.exceptions import PermissionDenied
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from gym_tracker.permissions import IsStaffOrAdminInAnyGym
 from gym_tracker.utils import get_gym_id_param
 
 from .models import GymMembership, Role, User
-from .serializer import GymAdminSerializer, PersonSerializer, StaffMemberSerializer
+from .serializer import (
+    GymAdminSerializer,
+    MeSerializer,
+    PersonSerializer,
+    RegisterSerializer,
+    StaffMemberSerializer,
+)
+
+
+# ----------------- AUTENTICACIÓN (JWT) -----------------
+
+class LoginView(TokenObtainPairView):
+    """
+    POST /users/auth/login/ {email, password} -> {access, refresh}.
+    Después mandar `Authorization: Bearer <access>` en cada pedido.
+    """
+    throttle_scope = 'auth'
+
+
+class RefreshView(TokenRefreshView):
+    """POST /users/auth/refresh/ {refresh} -> {access} nuevo cuando vence el anterior."""
+    throttle_scope = 'auth'
+
+
+class RegisterView(generics.CreateAPIView):
+    """
+    POST /users/auth/register/ {email, password, first_name, last_name}.
+    Crea el usuario sin gimnasios: un ADMIN lo suma a su gimnasio con un rol.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    serializer_class = RegisterSerializer
+    throttle_scope = 'auth'
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        return Response(MeSerializer(user).data, status=status.HTTP_201_CREATED)
+
+
+class MeView(generics.RetrieveUpdateAPIView):
+    """
+    GET /users/me/ -> Datos del usuario logueado con sus gimnasios y su rol en cada uno.
+    PATCH /users/me/ -> Edita nombre y apellido.
+    """
+    serializer_class = MeSerializer
+    http_method_names = ['get', 'patch', 'head', 'options']
+
+    def get_object(self):
+        return (
+            User.objects
+            .prefetch_related(Prefetch('memberships', queryset=GymMembership.objects.select_related('gym')))
+            .get(pk=self.request.user.pk)
+        )
+
+
+# ----------------- USUARIOS POR ROL -----------------
 
 
 class _GymScopedUserViewSet(viewsets.ReadOnlyModelViewSet):
