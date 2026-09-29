@@ -2,19 +2,35 @@ name: Backend
 
 on:
   push:
-    branches: [main]
     paths-ignore: ['client/**', '**.md']
-  pull_request:
-    paths-ignore: ['client/**', '**.md']
+  workflow_dispatch:
 
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    # Mismo motor que en producción (Coolify)
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: gym
+          POSTGRES_PASSWORD: gym
+          POSTGRES_DB: gym
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U gym -d gym"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     env:
       # Solo para CI: no es un secreto de ningún entorno real
       DJANGO_SECRET_KEY: ci-only-insecure-key-used-to-run-the-test-suite
       # Con DEBUG=False se activa la redirección a HTTPS y el cliente de tests recibiría 301
       DJANGO_DEBUG: 'True'
+      DATABASE_URL: postgres://gym:gym@localhost:5432/gym
+
     steps:
       - uses: actions/checkout@v4
 

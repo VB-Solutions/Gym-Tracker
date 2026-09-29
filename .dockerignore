@@ -1,0 +1,31 @@
+# Imagen de la API: solo el código Django y requirements.txt
+.git
+.github
+.gitattributes
+.gitignore
+.dockerignore
+Dockerfile
+
+# Entornos y datos locales
+.venv
+venv
+.env
+db.sqlite3
+db.sqlite3-journal
+staticfiles
+**/__pycache__
+**/*.py[cod]
+
+# El frontend tiene su propia imagen (client/Dockerfile)
+client
+node_modules
+
+# Editores y herramientas
+.idea
+.vscode
+.claude
+skills-lock.json
+
+# Documentación
+docs
+*.md

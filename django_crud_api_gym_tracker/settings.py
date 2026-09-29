@@ -15,6 +15,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
+import dj_database_url
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -76,8 +77,12 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    # Primero: /health/ responde sin pasar por ALLOWED_HOSTS ni la redirección a HTTPS
+    'django_crud_api_gym_tracker.health.HealthCheckMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    # Sirve los estáticos (admin, API navegable) desde gunicorn en producción
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -109,12 +114,23 @@ WSGI_APPLICATION = 'django_crud_api_gym_tracker.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+# En producción DATABASE_URL apunta al PostgreSQL (ej. postgres://usuario:clave@host:5432/base);
+# sin esa variable se usa SQLite local para desarrollo
+if os.environ.get('DATABASE_URL'):
+    DATABASES = {
+        'default': dj_database_url.parse(
+            os.environ['DATABASE_URL'],
+            conn_max_age=600,
+            conn_health_checks=True,
+        ),
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 
 # Password validation
@@ -160,6 +176,18 @@ STATIC_URL = 'static/'
 # `python manage.py collectstatic` junta acá los archivos del admin y de Swagger para servirlos
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    # En producción: archivos comprimidos y con hash en el nombre (se pueden cachear para siempre).
+    # Requiere haber corrido collectstatic, por eso en desarrollo y tests se usa el storage normal
+    'staticfiles': {
+        'BACKEND': (
+            'django.contrib.staticfiles.storage.StaticFilesStorage' if DEBUG
+            else 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+        ),
+    },
+}
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CORS_ALLOWED_ORIGINS = env_list('DJANGO_CORS_ORIGINS', 'http://localhost:5173')
@@ -185,4 +213,18 @@ REST_FRAMEWORK = {
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+}
+
+# Todo a la consola (stdout/stderr): es lo que muestran los logs del contenedor en Coolify.
+# Sin esto, con DEBUG=False Django no imprime los errores 500 en ningún lado
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler'},
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': os.environ.get('DJANGO_LOG_LEVEL', 'INFO'),
+    },
 }
