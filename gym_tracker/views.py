@@ -1,9 +1,9 @@
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from .permissions import IsGymStaffOrAdminOrReadOnly
 from .utils import get_gym_id_param, get_int_param, require_gym_role
-from django.db.models import Prefetch, Q
+from django.db.models import Prefetch, ProtectedError, Q
 
 from users.models import Role
 
@@ -121,6 +121,14 @@ class CustomExerciseViewSet(viewsets.ModelViewSet):
             "Solo STAFF o ADMIN de este gimnasio pueden crear ejercicios.",
         )
         serializer.save()
+
+    def perform_destroy(self, instance):
+        try:
+            instance.delete()
+        except ProtectedError:
+            raise ValidationError(
+                "No se puede borrar: el ejercicio está en rutinas. Primero sacalo de esas rutinas."
+            )
 
 
 

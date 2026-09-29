@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models.functions import Lower
 
 from .validators import validate_series_data
 
@@ -7,6 +8,12 @@ from .validators import validate_series_data
 
 class Gym(models.Model):
     name = models.CharField(max_length=30)
+
+    class Meta:
+        constraints = [
+            # Sin repetir nombres, sin importar mayúsculas ("Gym Centro" = "gym centro")
+            models.UniqueConstraint(Lower('name'), name='unique_gym_name_ci'),
+        ]
 
     def __str__(self):
         return self.name
@@ -19,6 +26,11 @@ class Muscle(models.Model):
     muscle_name = models.CharField(max_length=50)
     zone = models.CharField(max_length=50)
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(Lower('muscle_name'), name='unique_muscle_name_ci'),
+        ]
+
     def __str__(self):
         return self.muscle_name
 
@@ -26,10 +38,11 @@ class Exercise(models.Model):
     name = models.CharField(max_length=50)
     description = models.TextField(max_length=200)
 
+    # Si se borra el músculo, el ejercicio queda sin músculo (no se borra)
     muscle = models.ForeignKey(
-        Muscle, 
-        on_delete=models.CASCADE, 
-        related_name='exercises', 
+        Muscle,
+        on_delete=models.SET_NULL,
+        related_name='exercises',
         blank=True,
         null=True, # Necesario si blank=True en un ForeignKey
         help_text='Muscle of the exercise'
@@ -39,12 +52,11 @@ class Exercise(models.Model):
         return self.name
 
 class CustomExercise(Exercise):
+    # El nombre es único por gimnasio: se valida en el serializer (el campo es del modelo padre)
     gym = models.ForeignKey(
         Gym,
         on_delete=models.CASCADE,
         related_name='custom_exercises',
-        blank=True,
-        null=True,
         help_text='Gym where the custom exercise belongs to',
     )
     video = models.URLField(blank=True, null=True)
@@ -137,9 +149,10 @@ class ExerciseBlock(models.Model):
         related_name='blocks'
     )
     
+    # PROTECT: no se puede borrar un ejercicio que está en la rutina de alguien
     exercise = models.ForeignKey(
-        Exercise, 
-        on_delete=models.CASCADE, 
+        Exercise,
+        on_delete=models.PROTECT,
         related_name='exercise_blocks'
     )
     day_number = models.IntegerField()

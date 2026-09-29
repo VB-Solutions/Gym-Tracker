@@ -1,4 +1,7 @@
+from django.core.exceptions import ValidationError
 from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
+from django.test import TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from rest_framework import status
@@ -70,6 +73,53 @@ class CustomExerciseTests(GymTrackerAPITestCase):
         response = self.client.post(reverse('custom-exercise-list'), self._payload(self.other_gym))
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_custom_exercise_requires_a_gym(self):
+        self.client.force_authenticate(self.staff)
+        payload = self._payload(self.gym)
+        del payload['gym']
+
+        response = self.client.post(reverse('custom-exercise-list'), payload)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('gym', response.data)
+
+    def test_name_is_unique_per_gym_ignoring_case(self):
+        CustomExercise.objects.create(name='Press con banda', description='x', gym=self.gym)
+        other = CustomExercise.objects.create(name='Remo', description='x', gym=self.gym)
+        self.client.force_authenticate(self.staff)
+
+        payload = {**self._payload(self.gym), 'name': 'PRESS CON BANDA'}
+        response = self.client.post(reverse('custom-exercise-list'), payload)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('name', response.data)
+
+        response = self.client.patch(
+            reverse('custom-exercise-detail', args=[other.id]), {'name': 'press con banda'}
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_same_name_is_allowed_in_another_gym(self):
+        CustomExercise.objects.create(name='Press con banda', description='x', gym=self.other_gym)
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(reverse('custom-exercise-list'), self._payload(self.gym))
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_cannot_delete_exercise_used_in_a_routine(self):
+        exercise = CustomExercise.objects.create(name='Remo', description='x', gym=self.gym)
+        routine = Routine.objects.create(name='Espalda', gym=self.gym, staff=self.staff, person=self.person)
+        ExerciseBlock.objects.create(routine=routine, exercise=exercise, day_number=1, order=1)
+        unused = CustomExercise.objects.create(name='Dominadas', description='x', gym=self.gym)
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.delete(reverse('custom-exercise-detail', args=[exercise.id]))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(CustomExercise.objects.filter(id=exercise.id).exists())
+
+        response = self.client.delete(reverse('custom-exercise-detail', args=[unused.id]))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
 
     def test_person_cannot_edit_custom_exercise(self):
         exercise = CustomExercise.objects.create(name='Remo', description='Remo', gym=self.gym)
@@ -397,6 +447,51 @@ class GymQueryParamTests(GymTrackerAPITestCase):
             with self.subTest(url_name=url_name):
                 response = self.client.get(reverse(url_name), {'gym': self.other_gym.id})
                 self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class ModelIntegrityTests(TestCase):
+    def test_deleting_a_muscle_keeps_its_exercises(self):
+        muscle = Muscle.objects.create(muscle_name='Pecho', zone='Tren superior')
+        exercise = Exercise.objects.create(name='Press', description='x', muscle=muscle)
+
+        muscle.delete()
+
+        exercise.refresh_from_db()
+        self.assertIsNone(exercise.muscle)
+
+    def test_gym_and_muscle_names_are_unique_ignoring_case(self):
+        Gym.objects.create(name='Gym Centro')
+        Muscle.objects.create(muscle_name='Pecho', zone='Tren superior')
+
+        with self.assertRaises(ValidationError):
+            Gym(name='gym centro').full_clean()
+        with self.assertRaises(ValidationError):
+            Muscle(muscle_name='PECHO', zone='Tren superior').full_clean()
+
+
+class ModelIntegrityMigrationTests(TransactionTestCase):
+    """gym_tracker.0010 frena con un mensaje claro si hay datos que no cumplen las reglas nuevas."""
+
+    before = [('gym_tracker', '0009_exerciseblock_series_data_validation')]
+    after = [('gym_tracker', '0010_model_integrity')]
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def test_orphan_custom_exercises_stop_the_migration(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.before)
+        old_apps = executor.loader.project_state(self.before).apps
+        orphan = old_apps.get_model('gym_tracker', 'CustomExercise').objects.create(name='Sin gym', description='x')
+
+        executor = MigrationExecutor(connection)
+        with self.assertRaisesMessage(RuntimeError, f'ejercicios propios sin gimnasio (ids [{orphan.pk}])'):
+            executor.migrate(self.after)
+
+        # Se arregla el dato y la migración pasa
+        old_apps.get_model('gym_tracker', 'CustomExercise').objects.filter(pk=orphan.pk).delete()
+        MigrationExecutor(connection).migrate(self.after)
 
 
 class SchemaTests(APITestCase):

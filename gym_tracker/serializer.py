@@ -40,20 +40,30 @@ class CustomExerciseSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomExercise
         fields = ('id', 'name', 'description', 'muscle', 'gym', 'video')
-        
-    def validate_gym(self, value):
-        if self.instance and self.instance.gym != value:
-            raise serializers.ValidationError("No se permite cambiar el gimnasio de un ejercicio existente.")
-        return value
 
     def __init__(self, *args, **kwargs):
         # Primero ejecutamos el constructor original
         super(CustomExerciseSerializer, self).__init__(*args, **kwargs)
-        
+
         # 'self.instance' existe solo cuando estamos haciendo un UPDATE (PUT/PATCH)
         # Si 'self.instance' es None, significa que es un CREATE (POST)
         if self.instance is not None:
             self.fields['gym'].read_only = True
+
+    def validate(self, attrs):
+        # Nombre único dentro del gimnasio, sin importar mayúsculas
+        gym = attrs.get('gym') or self.instance.gym
+        name = attrs.get('name') or self.instance.name
+
+        same_name = CustomExercise.objects.filter(gym=gym, name__iexact=name)
+        if self.instance is not None:
+            same_name = same_name.exclude(pk=self.instance.pk)
+        if same_name.exists():
+            raise serializers.ValidationError(
+                {"name": "Ya existe un ejercicio propio con este nombre en el gimnasio."}
+            )
+
+        return attrs
 
 
 class GymStandardExerciseVideoSerializer(serializers.ModelSerializer):
