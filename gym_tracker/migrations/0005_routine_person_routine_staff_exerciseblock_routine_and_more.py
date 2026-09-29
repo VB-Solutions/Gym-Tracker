@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('gym_tracker', '0004_exercise_exerciseblock_gym_gymstandardexercisevideo_and_more'),
+        ('gym_tracker', '0001_squashed_0004_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

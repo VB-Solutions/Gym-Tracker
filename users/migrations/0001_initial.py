@@ -10,7 +10,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('auth', '0012_alter_user_first_name_max_length'),
-        ('gym_tracker', '0004_exercise_exerciseblock_gym_gymstandardexercisevideo_and_more'),
+        ('gym_tracker', '0001_squashed_0004_initial'),
     ]
 
     operations = [
