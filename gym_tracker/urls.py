@@ -17,13 +17,10 @@ router.register(
 router.register(r'routines', views.RoutineViewSet, basename='routine')
 
 urlpatterns = [
-    # 1. Rutas personalizadas PRIMERO (para que el router no las pise)
-    path('routines/all/', views.GetAllRoutinesView.as_view(), name='get_all_routines'),
-    
-    # 2. Rutas generadas por el Router
+    # 1. Rutas generadas por el Router
     path('', include(router.urls)),
-    
-    # 3. Documentación Swagger (drf-spectacular)
+
+    # 2. Documentación Swagger (drf-spectacular)
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
 ]

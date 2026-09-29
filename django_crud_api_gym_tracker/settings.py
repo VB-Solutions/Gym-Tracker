@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -99,6 +100,10 @@ DATABASES = {
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
+
+if sys.argv[1:2] == ['test']:
+    # Los tests crean muchos usuarios: un hasher rápido los acelera mucho (nunca en uso real)
+    PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
 
 AUTH_PASSWORD_VALIDATORS = [
     {

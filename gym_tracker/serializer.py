@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from users.models import Role
+
 from .models import (
     CustomExercise,
     Exercise,
@@ -86,27 +88,37 @@ class RoutineSerializer(serializers.ModelSerializer):
     class Meta:
         model = Routine
         fields = ('id', 'name', 'gym', 'staff', 'person')
-        # El staff lo asigna la View al crear (request.user); nadie puede cambiarlo por el JSON
-        read_only_fields = ('staff',)
 
-        
+
     def __init__(self, *args, **kwargs):
         # Primero ejecutamos el constructor original
         super(RoutineSerializer, self).__init__(*args, **kwargs)
-        
+
         # 'self.instance' existe solo cuando estamos haciendo un UPDATE (PUT/PATCH)
         # Si 'self.instance' es None, significa que es un CREATE (POST)
+        # Al editar solo se puede cambiar el nombre; el staff lo asigna la View al crear
         if self.instance is not None:
             self.fields['gym'].read_only = True
             self.fields['person'].read_only = True
+            self.fields['staff'].read_only = True
 
     def validate(self, attrs):
-        gym = attrs.get('gym') or getattr(self.instance, 'gym', None)
-        person = attrs.get('person') or getattr(self.instance, 'person', None)
+        # Al editar gym, person y staff son de solo lectura: solo hay que validar al crear
+        if self.instance is not None:
+            return attrs
 
-        if gym and person and not person.gyms.filter(id=gym.id).exists():
+        gym = attrs['gym']
+        person = attrs['person']
+        staff = attrs.get('staff')
+
+        if not person.has_gym_role(gym, Role.PERSON):
             raise serializers.ValidationError(
-                {"person": "La persona asignada debe pertenecer al gimnasio de la rutina."}
+                {"person": "La persona asignada tiene que ser socio (PERSON) del gimnasio de la rutina."}
+            )
+
+        if staff and not staff.has_gym_role(gym, Role.STAFF, Role.ADMIN):
+            raise serializers.ValidationError(
+                {"staff": "El entrenador asignado tiene que ser STAFF o ADMIN del gimnasio de la rutina."}
             )
 
         return attrs

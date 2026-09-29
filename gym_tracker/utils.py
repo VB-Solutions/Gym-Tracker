@@ -24,3 +24,9 @@ def get_gym_id_param(request, required=False):
         raise PermissionDenied("No tienes acceso a este gimnasio.")
 
     return gym_id
+
+
+def require_gym_role(user, gym, roles, message):
+    """403 si el usuario no tiene alguno de esos roles en el gimnasio (instancia o id)."""
+    if gym is None or not user.has_gym_role(gym, *roles):
+        raise PermissionDenied(message)

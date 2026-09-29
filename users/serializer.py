@@ -1,15 +1,24 @@
 from rest_framework import serializers
 
-from gym_tracker.serializer import GymSerializer
+from .models import GymMembership, User
 
-from .models import User
+
+class UserGymSerializer(serializers.ModelSerializer):
+    """Un gimnasio del usuario con su rol ahí: {"id", "name", "role"}."""
+
+    id = serializers.IntegerField(source='gym.id', read_only=True)
+    name = serializers.CharField(source='gym.name', read_only=True)
+
+    class Meta:
+        model = GymMembership
+        fields = ('id', 'name', 'role')
+
 
 _USER_READ_FIELDS = (
     'id',
     'email',
     'first_name',
     'last_name',
-    'role',
     'is_active',
     'date_joined',
     'gyms',
@@ -19,7 +28,7 @@ _USER_READ_FIELDS = (
 class UserReadSerializer(serializers.ModelSerializer):
     """Safe fields for listing user profiles (no password or permissions)."""
 
-    gyms = GymSerializer(many=True, read_only=True)
+    gyms = UserGymSerializer(source='memberships', many=True, read_only=True)
 
     class Meta:
         model = User
@@ -27,15 +36,15 @@ class UserReadSerializer(serializers.ModelSerializer):
 
 
 class GymAdminSerializer(UserReadSerializer):
-    """Gym admins (`User.Role.ADMIN`). Use with a queryset filtered by that role."""
+    """Gym admins (rol ADMIN en algún gimnasio)."""
 
 
 class StaffMemberSerializer(UserReadSerializer):
-    """Trainers / staff (`User.Role.STAFF`)."""
+    """Trainers / staff (rol STAFF en algún gimnasio)."""
 
 
 class PersonSerializer(UserReadSerializer):
-    """Members / clients (`User.Role.PERSON`)."""
+    """Members / clients (rol PERSON en algún gimnasio)."""
 
 
 class UserSerializer(UserReadSerializer):

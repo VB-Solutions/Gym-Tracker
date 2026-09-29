@@ -1,31 +1,35 @@
 from rest_framework import permissions
 
-'----------- Permissions -------------'
-class IsStaffRole(permissions.BasePermission):
-    """
-    Permiso personalizado que solo deja pasar a los usuarios 
-    cuyo rol sea 'STAFF'.
-    """
-    def has_permission(self, request, view):
-        # Verificamos si el usuario está autenticado y tiene el rol correcto
-        return bool(request.user and request.user.is_authenticated and request.user.role == 'STAFF')
+from users.models import Role
 
-class IsPersonRole(permissions.BasePermission):
+'----------- Permissions -------------'
+# El rol de un usuario es POR GIMNASIO (users.GymMembership), por eso estos permisos
+# miran el gimnasio del objeto. Al CREAR todavía no hay objeto: ese chequeo se hace
+# en perform_create con utils.require_gym_role().
+
+class IsGymStaffOrAdminOrReadOnly(permissions.BasePermission):
     """
-    Permiso personalizado que solo deja pasar a los usuarios 
-    cuyo rol sea 'PERSON'.
+    Para objetos con `gym`: cualquiera que llegue al objeto lo puede leer
+    (el queryset ya filtra por gimnasio), pero solo STAFF o ADMIN de ese
+    gimnasio lo pueden modificar o borrar.
     """
+    message = "Solo STAFF o ADMIN de este gimnasio pueden hacer esto."
+
+    def has_object_permission(self, request, view, obj):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return request.user.has_gym_role(obj.gym_id, Role.STAFF, Role.ADMIN)
+
+
+class IsStaffOrAdminInAnyGym(permissions.BasePermission):
+    """El usuario es STAFF o ADMIN en al menos un gimnasio."""
+    message = "Solo STAFF o ADMIN pueden acceder a este recurso."
+
     def has_permission(self, request, view):
-        # Verificamos si el usuario está autenticado y tiene el rol correcto
-        return bool(request.user and request.user.is_authenticated and request.user.role == 'PERSON')
-    
-class IsAdminRole(permissions.BasePermission):
-    """
-    Permiso personalizado que solo deja pasar a los usuarios 
-    cuyo rol sea 'ADMIN'.
-    """
-    def has_permission(self, request, view):
-        # Verificamos si el usuario está autenticado y tiene el rol correcto
-        return bool(request.user and request.user.is_authenticated and request.user.role == 'ADMIN')
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.memberships.filter(role__in=[Role.STAFF, Role.ADMIN]).exists()
+        )
 
 '-----------------------------------'

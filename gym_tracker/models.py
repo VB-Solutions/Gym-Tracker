@@ -82,26 +82,45 @@ class GymStandardExerciseVideo(models.Model):
 
 # ----------------- RUTINAS Y BLOQUES -----------------
 
+class RoutineQuerySet(models.QuerySet):
+    def visible_to(self, user):
+        """
+        Rutinas que el usuario puede ver, según su rol en cada gimnasio
+        (y solo mientras siga perteneciendo a ese gimnasio):
+        - Las suyas como socio (person).
+        - Las que armó, si es STAFF o ADMIN de ese gimnasio.
+        - Todas las del gimnasio, si es ADMIN.
+        """
+        from users.models import Role
+
+        return self.filter(
+            models.Q(person=user, gym__in=user.memberships.values('gym_id'))
+            | models.Q(staff=user, gym__in=user.gym_ids_with_role(Role.STAFF, Role.ADMIN))
+            | models.Q(gym__in=user.gym_ids_with_role(Role.ADMIN))
+        )
+
+
 class Routine(models.Model):
+    objects = RoutineQuerySet.as_manager()
+
     name = models.CharField(max_length=100)
     gym = models.ForeignKey(
         Gym,
         on_delete=models.CASCADE,
         related_name='routines',
     )
+    # El rol es por gimnasio (users.GymMembership): se valida en el serializer, no acá
     staff = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name='staff_routines',
-        limit_choices_to={'role': 'STAFF'},
     )
     person = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='client_routines',
-        limit_choices_to={'role': 'PERSON'},
     )
 
     def __str__(self):

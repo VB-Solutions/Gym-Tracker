@@ -1,9 +1,11 @@
-from rest_framework import viewsets, generics
+from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import PermissionDenied, ValidationError
-from .permissions import IsStaffRole, IsAdminRole
-from .utils import get_gym_id_param
+from rest_framework.exceptions import PermissionDenied
+from .permissions import IsGymStaffOrAdminOrReadOnly
+from .utils import get_gym_id_param, require_gym_role
 from django.db.models import Q
+
+from users.models import Role
 
 from .models import (
     CustomExercise,
@@ -34,7 +36,7 @@ class GymViewSet(viewsets.ReadOnlyModelViewSet):
     """
     permission_classes = [IsAuthenticated]
     serializer_class = GymSerializer
-    
+
     def get_queryset(self):
         # Swagger genera el schema con un usuario anónimo
         if getattr(self, 'swagger_fake_view', False):
@@ -51,7 +53,7 @@ class MuscleViewSet(viewsets.ReadOnlyModelViewSet):
     """
     permission_classes = [IsAuthenticated]
     serializer_class = MuscleSerializer
-    
+
 
     queryset = Muscle.objects.all()
 
@@ -65,7 +67,7 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
     """
     permission_classes = [IsAuthenticated]
     serializer_class = ExerciseSerializer
-    
+
     def get_queryset(self):
 
         # Valida que ?gym sea numérico y que el usuario pertenezca a ese gym
@@ -87,18 +89,13 @@ class CustomExerciseViewSet(viewsets.ModelViewSet):
     Endpoint para Ejercicios Personalizados (Custom Exercises).
     - GET /custom-exercises/?gym=<id> -> Trae todos los ejercicios custom de ese Gym (El parámetro ?gym es OBLIGATORIO al listar).
     - GET /custom-exercises/<id>/ -> Trae el detalle de un ejercicio custom específico.
-    - POST /custom-exercises/ -> Crea un nuevo ejercicio custom (Solo STAFF o ADMIN).
-    - PUT/PATCH /custom-exercises/<id>/ -> Modifica un ejercicio custom (Solo STAFF o ADMIN).
-    - DELETE /custom-exercises/<id>/ -> Elimina un ejercicio custom (Solo STAFF o ADMIN).
+    - POST /custom-exercises/ -> Crea un nuevo ejercicio custom (Solo STAFF o ADMIN de ese gym).
+    - PUT/PATCH /custom-exercises/<id>/ -> Modifica un ejercicio custom (Solo STAFF o ADMIN de ese gym).
+    - DELETE /custom-exercises/<id>/ -> Elimina un ejercicio custom (Solo STAFF o ADMIN de ese gym).
     """
     serializer_class = CustomExerciseSerializer
-    
-    def get_permissions(self):
-        # Si intentan actualizar, borrar o crear, exigimos que sean STAFF o ADMIN
-        if self.action in ['update', 'partial_update', 'destroy', 'create']:
-            return [IsAuthenticated(), (IsStaffRole | IsAdminRole)()]
-
-        return [IsAuthenticated()]
+    # Editar y borrar: STAFF o ADMIN del gym del ejercicio (permiso a nivel objeto)
+    permission_classes = [IsAuthenticated, IsGymStaffOrAdminOrReadOnly]
 
     def get_queryset(self):
         """
@@ -113,19 +110,16 @@ class CustomExerciseViewSet(viewsets.ModelViewSet):
 
 
         return CustomExercise.objects.filter(gym__in=self.request.user.gyms.all())
-    
+
     def perform_create(self, serializer):
-        gym_solicitado = serializer.validated_data.get('gym')
-        if gym_solicitado not in self.request.user.gyms.all():
-            raise PermissionDenied("No puedes crear un ejercicio en un gimnasio al que no perteneces.")
+        require_gym_role(
+            self.request.user,
+            serializer.validated_data.get('gym'),
+            [Role.STAFF, Role.ADMIN],
+            "Solo STAFF o ADMIN de este gimnasio pueden crear ejercicios.",
+        )
         serializer.save()
-        
-    def perform_update(self, serializer):
-        gym_solicitado = serializer.validated_data.get('gym')
-        if gym_solicitado and gym_solicitado not in self.request.user.gyms.all():
-            raise PermissionDenied("No puedes mover este ejercicio a un gimnasio al que no perteneces.")
-        serializer.save()
-    
+
 
 
 class GymStandardExerciseVideoViewSet(viewsets.ModelViewSet):
@@ -133,18 +127,12 @@ class GymStandardExerciseVideoViewSet(viewsets.ModelViewSet):
     Endpoint para Videos Propios de Ejercicios Estándar.
     - GET /gym-standard-exercise-videos/?gym=<id> -> Trae los videos del gym (Obligatorio enviar el gym).
     - GET /gym-standard-exercise-videos/<id>/ -> Trae el detalle de un video específico.
-    - POST /gym-standard-exercise-videos/ -> Asigna un video a un ejercicio estándar (Solo STAFF o ADMIN).
-    - PUT/PATCH /gym-standard-exercise-videos/<id>/ -> Edita el link del video (Solo STAFF o ADMIN).
-    - DELETE /gym-standard-exercise-videos/<id>/ -> Elimina el video (Solo STAFF o ADMIN).
+    - POST /gym-standard-exercise-videos/ -> Asigna un video a un ejercicio estándar (Solo STAFF o ADMIN de ese gym).
+    - PUT/PATCH /gym-standard-exercise-videos/<id>/ -> Edita el link del video (Solo STAFF o ADMIN de ese gym).
+    - DELETE /gym-standard-exercise-videos/<id>/ -> Elimina el video (Solo STAFF o ADMIN de ese gym).
     """
     serializer_class = GymStandardExerciseVideoSerializer
-    
-    def get_permissions(self):
-        # Si intentan actualizar, borrar o crear, exigimos que sean STAFF o ADMIN
-        if self.action in ['update', 'partial_update', 'destroy', 'create']:
-            return [IsAuthenticated(), (IsStaffRole | IsAdminRole)()]
-
-        return [IsAuthenticated()]
+    permission_classes = [IsAuthenticated, IsGymStaffOrAdminOrReadOnly]
 
     def get_queryset(self):
         """
@@ -160,131 +148,90 @@ class GymStandardExerciseVideoViewSet(viewsets.ModelViewSet):
 
         # Para retrieve, update o destroy, busca en los gimnasios del usuario
         return GymStandardExerciseVideo.objects.filter(gym__in=self.request.user.gyms.all())
-    
+
     def perform_create(self, serializer):
-        # Validamos inyección de ID de gimnasio al crear
-        gym_solicitado = serializer.validated_data.get('gym')
-        if gym_solicitado not in self.request.user.gyms.all():
-            raise PermissionDenied("No puedes crear un video en un gimnasio al que no perteneces.")
+        require_gym_role(
+            self.request.user,
+            serializer.validated_data.get('gym'),
+            [Role.STAFF, Role.ADMIN],
+            "Solo STAFF o ADMIN de este gimnasio pueden cargar videos.",
+        )
         serializer.save()
-   
+
 
 
 
 class RoutineViewSet(viewsets.ModelViewSet):
     """
-    Endpoint para Gestión de Rutinas.
-    
+    Endpoint para Gestión de Rutinas. Lo que ve cada uno depende de su rol en cada gimnasio
+    (PERSON: las suyas | STAFF: las que armó | ADMIN: todas las del gym).
+
     ACCESIBLE POR TODOS (SOCIOS, STAFF, ADMIN):
-    - GET /routines/?gym=<id> -> Trae la lista de rutinas filtradas por rol (Obligatorio enviar el gym).
-                                 (PERSON: Ve las suyas | STAFF: Ve las que creó | ADMIN: Ve todas del gym).
+    - GET /routines/ -> Trae las rutinas que podés ver. Con ?gym=<id> filtra por ese gimnasio.
     - GET /routines/<id>/ -> Trae el detalle completo de una rutina específica.
-    - PUT/PATCH /routines/<id>/ -> Edita una rutina existente.
-    
-    SOLO ACCESIBLE POR STAFF O ADMIN:
-    - POST /routines/ -> Crea una nueva rutina (El creador debe pertenecer al gym indicado).
-    
+    - PUT/PATCH /routines/<id>/ -> Edita una rutina existente (solo el nombre).
+
+    SOLO ACCESIBLE POR STAFF O ADMIN DEL GYM:
+    - POST /routines/ -> Crea una nueva rutina. El staff es quien la crea; un ADMIN puede
+                         asignársela a otro entrenador mandando `staff`.
+
     - DELETE /routines/<id>/ -> Elimina una rutina.
     """
-    # Usamos el Detail para recuperar datos complejos (con bloques), 
-    # pero podrías querer usar el plano (RoutineSerializer) para listar y crear.
-    # Por ahora dejamos el Detail como pediste.
+    permission_classes = [IsAuthenticated]
+
     def get_serializer_class(self):
         """
         Decide dinámicamente qué Serializer usar.
         """
         # GET
-        # 
+        #
         if self.action in ['list', 'retrieve']:
             return RoutineDetailSerializer
-            
+
         #  (POST, PUT, PATCH)
         return RoutineSerializer
-    
-    def get_permissions(self):
-        # Si la acción es CREAR, solo STAFF o ADMIN
-        if self.action in ['create', 'destroy']:
-            return [IsAuthenticated(), (IsStaffRole | IsAdminRole)()]
-
-        # Para listar, ver detalle y EDITAR (el queryset ya limita a las rutinas de cada rol)
-        return [IsAuthenticated()]
 
     def get_queryset(self):
         """
-        Filtra las rutinas según el rol del usuario y el gimnasio solicitado.
+        Filtra las rutinas según el rol del usuario en cada gimnasio.
         """
         if getattr(self, 'swagger_fake_view', False):
             return Routine.objects.none()
 
-        user = self.request.user
-        role = user.role
-        
-        # Empezamos con una consulta vacía por seguridad
-        qs = Routine.objects.none()
+        qs = Routine.objects.visible_to(self.request.user)
 
-        # Comportamiento para listar (GET /routines/)
         if self.action == 'list':
-            # 1 y 2. Obligar a mandar el gimnasio y validar que pertenezca a él
-            gym_id = get_gym_id_param(self.request, required=True)
+            gym_id = get_gym_id_param(self.request)
+            if gym_id:
+                qs = qs.filter(gym_id=gym_id)
 
-            # 3. Filtrar según el ROL sobre ese gimnasio específico
-            if role == 'PERSON':
-                qs = Routine.objects.filter(gym_id=gym_id, person=user)
-            elif role == 'STAFF':
-                qs = Routine.objects.filter(gym_id=gym_id, staff=user)
-            elif role == 'ADMIN':
-                qs = Routine.objects.filter(gym_id=gym_id) # El admin ve todas las del gym
-
-            return qs
-
-        # Comportamiento para detalle/editar/borrar (ej: GET /routines/5/)
-        # Acá dejamos que Django busque entre todas las rutinas que el usuario tiene derecho a ver
-        if role == 'PERSON':
-            qs = Routine.objects.filter(person=user)
-        elif role == 'STAFF':
-            qs = Routine.objects.filter(staff=user)
-        elif role == 'ADMIN':
-            # El admin busca en todos los gimnasios que administra
-            qs = Routine.objects.filter(gym__in=user.gyms.all())
-            
         return qs
 
     def perform_create(self, serializer):
         """
         Validaciones antes de guardar una rutina nueva.
         """
-        gym_solicitado = serializer.validated_data.get('gym')
-        person_solicitada = serializer.validated_data.get('person')
-        
-        # Validar que el Staff/Admin pertenezca al gimnasio donde intenta crear la rutina
-        if gym_solicitado not in self.request.user.gyms.all():
-            raise PermissionDenied("No puedes crear una rutina en un gimnasio al que no perteneces.")
+        user = self.request.user
+        gym = serializer.validated_data.get('gym')
 
-        # La persona objetivo también debe pertenecer al gimnasio de la rutina.
-        if person_solicitada and not person_solicitada.gyms.filter(id=gym_solicitado.id).exists():
-            raise ValidationError({"person": "La persona asignada no pertenece a este gimnasio."})
-            
-        # Opcional (pero recomendado): Asegurarte de que el campo 'staff' sea el usuario actual
-        # Así el Staff no tiene que mandar su propio ID en el JSON, lo sacás del Token.
-        serializer.save(staff=self.request.user)
+        require_gym_role(
+            user, gym, [Role.STAFF, Role.ADMIN],
+            "Solo STAFF o ADMIN de este gimnasio pueden crear rutinas.",
+        )
 
-    def perform_update(self, serializer):
-        """
-        Validaciones antes de actualizar una rutina.
-        """
-        person_solicitada = serializer.validated_data.get('person') or serializer.instance.person
-        gym_actual = serializer.instance.gym
-        gym_solicitado = serializer.validated_data.get('gym')
-        
-        # Evitar que muevan la rutina a un gimnasio ajeno
-        if gym_solicitado and gym_solicitado not in self.request.user.gyms.all():
-            raise PermissionDenied("No puedes mover esta rutina a un gimnasio al que no perteneces.")
+        # Por defecto el staff es quien crea la rutina (sale del token, no del JSON)
+        staff = serializer.validated_data.get('staff') or user
+        if staff != user and not user.has_gym_role(gym, Role.ADMIN):
+            raise PermissionDenied("Solo un ADMIN del gimnasio puede asignarle la rutina a otro entrenador.")
 
-        # La persona de la rutina debe pertenecer al gimnasio de la rutina.
-        if person_solicitada and not person_solicitada.gyms.filter(id=gym_actual.id).exists():
-            raise ValidationError({"person": "La persona asignada no pertenece al gimnasio de esta rutina."})
-            
-        serializer.save()
+        serializer.save(staff=staff)
+
+    def perform_destroy(self, instance):
+        require_gym_role(
+            self.request.user, instance.gym_id, [Role.STAFF, Role.ADMIN],
+            "Solo STAFF o ADMIN de este gimnasio pueden borrar rutinas.",
+        )
+        instance.delete()
 
 
 
@@ -292,49 +239,3 @@ class RoutineViewSet(viewsets.ModelViewSet):
 # class ExerciseBlockViewSet(viewsets.ModelViewSet):
 #     queryset = ExerciseBlock.objects.all()
 #     serializer_class = ExerciseBlockSerializer
-  
-    
-
-
-class GetAllRoutinesView(generics.ListAPIView):
-    """
-     Aca le pedis que te traiga todas las rutinas.
-     Se fija que rol tenes
-     SI pasas el query Parameter gym (EL ID), filtra por ese gym
-     
-    """    
-    serializer_class = RoutineSerializer 
-    permission_classes = [IsAuthenticated]
-    def get_queryset(self):
-        
-        user = self.request.user
-        gym_id = get_gym_id_param(self.request)
-
-        #si person
-        if user.role == 'PERSON':
-            qs = Routine.objects.filter(person=user)
-            if gym_id :
-                qs = qs.filter(gym_id=gym_id)
-            return qs
-
-        #Si staff
-        elif user.role == 'STAFF':
-            qs = Routine.objects.filter(staff=user)
-            if gym_id :
-                qs = qs.filter(gym_id=gym_id)
-            return  qs
-
-        #Si admin
-        elif user.role == 'ADMIN':
-
-            qs = Routine.objects.filter(gym__in=user.gyms.all())
-            
-            if gym_id:
-               
-                qs = qs.filter(gym_id=gym_id)
-            return qs
-
-        
-        # devulve nada por las dudas
-        return Routine.objects.none()
-    
