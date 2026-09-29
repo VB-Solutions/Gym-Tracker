@@ -28,7 +28,7 @@ class GymScopedUserEndpointsTests(APITestCase):
         return user
 
     def _emails(self, response):
-        return [user['email'] for user in response.data]
+        return [user['email'] for user in response.data['results']]
 
     def test_anonymous_cannot_list_users(self):
         for url_name in ['gym-admin-list', 'gym-staff-list', 'gym-person-list']:
@@ -81,7 +81,7 @@ class GymScopedUserEndpointsTests(APITestCase):
         response = self.client.get(reverse('gym-staff-list'))
 
         self.assertEqual(
-            response.data[0]['gyms'],
+            response.data['results'][0]['gyms'],
             [{'id': self.gym.id, 'name': 'Gym Centro', 'role': Role.STAFF}],
         )
 
@@ -252,7 +252,7 @@ class GymMembershipManagementTests(APITestCase):
         response = self.client.get(reverse('gym-membership-list'))
 
         self.assertEqual(
-            {membership['user']['email'] for membership in response.data},
+            {membership['user']['email'] for membership in response.data['results']},
             {'admin@test.com', 'staff@test.com'},
         )
 

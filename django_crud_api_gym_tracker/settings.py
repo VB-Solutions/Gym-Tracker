@@ -156,6 +156,7 @@ REST_FRAMEWORK = {
     ],
     # Todo requiere estar autenticado salvo que la View diga lo contrario (login, registro, docs)
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    "DEFAULT_PAGINATION_CLASS": "gym_tracker.pagination.StandardPagination",
     # Solo limita las Views que declaran `throttle_scope` (login, refresh y registro)
     "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.ScopedRateThrottle"],
     "DEFAULT_THROTTLE_RATES": {"auth": "20/min"},

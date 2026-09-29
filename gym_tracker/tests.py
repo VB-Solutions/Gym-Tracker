@@ -1,10 +1,20 @@
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from users.models import GymMembership, Role, User
 
-from .models import CustomExercise, Exercise, ExerciseBlock, Gym, Muscle, Routine
+from .models import (
+    CustomExercise,
+    Exercise,
+    ExerciseBlock,
+    Gym,
+    GymStandardExerciseVideo,
+    Muscle,
+    Routine,
+)
 
 
 class GymTrackerAPITestCase(APITestCase):
@@ -165,7 +175,7 @@ class RoutineTests(GymTrackerAPITestCase):
             with self.subTest(user=user.email):
                 self.client.force_authenticate(user)
                 response = self.client.get(reverse('routine-list'), {'gym': self.gym.id})
-                self.assertEqual({routine['name'] for routine in response.data}, names)
+                self.assertEqual({routine['name'] for routine in response.data['results']}, names)
 
     def test_person_loses_access_after_leaving_the_gym(self):
         GymMembership.objects.filter(user=self.person, gym=self.gym).delete()
@@ -224,7 +234,7 @@ class ExerciseBlockTests(GymTrackerAPITestCase):
         self.client.force_authenticate(self.person)
 
         listing = self.client.get(reverse('exercise-block-list'), {'routine': self.routine.id})
-        self.assertEqual([item['id'] for item in listing.data], [block.id])
+        self.assertEqual([item['id'] for item in listing.data['results']], [block.id])
 
         self.assertEqual(self._create(order=2).status_code, status.HTTP_403_FORBIDDEN)
         response = self.client.patch(reverse('exercise-block-detail', args=[block.id]), {'order': 5})
@@ -277,6 +287,91 @@ class ExerciseBlockTests(GymTrackerAPITestCase):
         self.assertEqual(self.client.get(reverse('exercise-block-list')).status_code, status.HTTP_400_BAD_REQUEST)
         response = self.client.get(reverse('exercise-block-list'), {'routine': 'abc'})
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class RoutineDetailTests(GymTrackerAPITestCase):
+    """Lo que devuelve GET /routines/: videos por gym y cantidad de queries."""
+
+    def setUp(self):
+        super().setUp()
+        self.standard = Exercise.objects.create(name='Sentadilla', description='Con barra', muscle=self.muscle)
+        self.custom = CustomExercise.objects.create(
+            name='Press con banda', description='x', gym=self.gym, video='https://videos.test/banda',
+        )
+        GymStandardExerciseVideo.objects.create(gym=self.gym, exercise=self.standard, video='https://videos.test/centro')
+        GymStandardExerciseVideo.objects.create(gym=self.other_gym, exercise=self.standard, video='https://videos.test/ajeno')
+
+    def _routine_with_blocks(self, name):
+        routine = Routine.objects.create(name=name, gym=self.gym, staff=self.staff, person=self.person)
+        ExerciseBlock.objects.create(routine=routine, exercise=self.standard, day_number=1, order=1)
+        ExerciseBlock.objects.create(routine=routine, exercise=self.custom, day_number=1, order=2)
+        return routine
+
+    def _list_routines(self):
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(reverse('routine-list'))
+        return response, len(queries)
+
+    def test_video_url_uses_the_routine_gym(self):
+        routine = self._routine_with_blocks('Piernas')
+        self.client.force_authenticate(self.person)
+
+        response = self.client.get(reverse('routine-detail', args=[routine.id]))
+
+        videos = [block['exercise']['video_url'] for block in response.data['blocks']]
+        self.assertEqual(videos, ['https://videos.test/centro', 'https://videos.test/banda'])
+
+    def test_number_of_queries_does_not_grow_with_routines(self):
+        self.client.force_authenticate(self.person)
+        self._routine_with_blocks('Rutina 1')
+        response, queries_with_one = self._list_routines()
+        self.assertEqual(response.data['count'], 1)
+
+        for number in range(2, 6):
+            self._routine_with_blocks(f'Rutina {number}')
+        response, queries_with_five = self._list_routines()
+
+        self.assertEqual(response.data['count'], 5)
+        self.assertEqual(queries_with_five, queries_with_one)
+
+    def test_lists_are_paginated(self):
+        for number in range(1, 4):
+            Routine.objects.create(name=f'Rutina {number}', gym=self.gym, staff=self.staff, person=self.person)
+        self.client.force_authenticate(self.person)
+
+        response = self.client.get(reverse('routine-list'), {'page_size': 2})
+
+        self.assertEqual(response.data['count'], 3)
+        self.assertEqual(len(response.data['results']), 2)
+        self.assertIsNotNone(response.data['next'])
+
+
+class GymStandardExerciseVideoTests(GymTrackerAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.standard = Exercise.objects.create(name='Sentadilla', description='Con barra')
+        self.client.force_authenticate(self.staff)
+
+    def _create(self, exercise):
+        return self.client.post(reverse('gym-standard-exercise-video-list'), {
+            'gym': self.gym.id, 'exercise': exercise.id, 'video': 'https://videos.test/x',
+        })
+
+    def test_staff_adds_video_to_standard_exercise(self):
+        self.assertEqual(self._create(self.standard).status_code, status.HTTP_201_CREATED)
+
+    def test_custom_exercises_cannot_get_a_standard_video(self):
+        custom = CustomExercise.objects.create(name='Propio', description='x', gym=self.gym)
+
+        response = self._create(custom)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('exercise', response.data)
+
+    def test_one_video_per_exercise_and_gym(self):
+        self._create(self.standard)
+
+        self.assertEqual(self._create(self.standard).status_code, status.HTTP_400_BAD_REQUEST)
 
 
 class GymQueryParamTests(GymTrackerAPITestCase):

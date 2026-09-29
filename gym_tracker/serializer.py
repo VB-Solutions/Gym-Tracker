@@ -1,3 +1,4 @@
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from users.models import Role
@@ -62,16 +63,13 @@ class GymStandardExerciseVideoSerializer(serializers.ModelSerializer):
         
         
     def validate_exercise(self, value):
-        if self.instance and self.instance.exercise != value:
-            raise serializers.ValidationError("No se permite cambiar el exercise video.")
+        # Los ejercicios propios guardan su video en CustomExercise.video
+        if CustomExercise.objects.filter(pk=value.pk).exists():
+            raise serializers.ValidationError(
+                "Solo se cargan videos de ejercicios estándar; los ejercicios propios tienen su propio campo `video`."
+            )
         return value
-    
-    def validate_gym(self, value):
-        if self.instance and self.instance.gym != value:
-            raise serializers.ValidationError("No se permite cambiar el gimnasio de un video.")
-        return value
-    
-    
+
 
     def __init__(self, *args, **kwargs):
         # Primero ejecutamos el constructor original
@@ -194,22 +192,21 @@ DRF buscará automáticamente una función llamada get_video_url para llenar est
         fields = ('id', 'name', 'muscle_name', 'video_url')
 
     def get_video_url(self, obj) -> str | None:
-        # 1. Obtenemos el gimnasio desde el contexto (se lo pasaremos desde la View)
-        gym = self.context.get('gym')
-        if not gym:
+        # 1. Obtenemos el gimnasio de la rutina desde el contexto (lo pasa ExerciseBlockDetailSerializer)
+        gym_id = self.context.get('gym_id')
+        if not gym_id:
             return None
 
         # 2. Si el ejercicio es Custom (Django lo sabe mágicamente por la herencia)
         if hasattr(obj, 'customexercise'):
             return obj.customexercise.video
 
-        # 3. Si es Estándar, buscamos si este gym en particular le puso un video
-        video_gym = GymStandardExerciseVideo.objects.filter(
-            gym=gym, 
-            exercise=obj
-        ).first()
-        
-        return video_gym.video if video_gym else None
+        # 3. Si es Estándar, buscamos si este gym en particular le puso un video.
+        # Se filtra en Python para aprovechar el prefetch de la View (sin una query por bloque)
+        return next(
+            (gym_video.video for gym_video in obj.gym_videos.all() if gym_video.gym_id == gym_id),
+            None,
+        )
 
 
 class ExerciseBlockDetailSerializer(serializers.ModelSerializer):
@@ -217,12 +214,17 @@ class ExerciseBlockDetailSerializer(serializers.ModelSerializer):
     Detalle del bloque. En lugar de devolver solo el ID del ejercicio,
     anida toda la información que definimos en ExerciseInBlockSerializer.
     """
-    # Anidamos el ejercicio
-    exercise = ExerciseInBlockSerializer(read_only=True)
+    # Anidamos el ejercicio (con el video que corresponde al gym de la rutina)
+    exercise = serializers.SerializerMethodField()
 
     class Meta:
         model = ExerciseBlock
         fields = ('id', 'day_number', 'order', 'series_data', 'exercise')
+
+    @extend_schema_field(ExerciseInBlockSerializer)
+    def get_exercise(self, block):
+        context = {**self.context, 'gym_id': block.routine.gym_id}
+        return ExerciseInBlockSerializer(block.exercise, context=context).data
 
 
 class RoutineDetailSerializer(serializers.ModelSerializer):

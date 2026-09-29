@@ -3,7 +3,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
 from .permissions import IsGymStaffOrAdminOrReadOnly
 from .utils import get_gym_id_param, get_int_param, require_gym_role
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 
 from users.models import Role
 
@@ -44,7 +44,7 @@ class GymViewSet(viewsets.ReadOnlyModelViewSet):
         if getattr(self, 'swagger_fake_view', False):
             return Gym.objects.none()
 
-        return self.request.user.gyms.all()
+        return self.request.user.gyms.order_by('name')
 
 
 class MuscleViewSet(viewsets.ReadOnlyModelViewSet):
@@ -57,7 +57,7 @@ class MuscleViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = MuscleSerializer
 
 
-    queryset = Muscle.objects.all()
+    queryset = Muscle.objects.order_by('muscle_name')
 
 
 class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
@@ -77,12 +77,12 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
 
         #No se manda gym
         if not gym_id:
-            return Exercise.objects.filter(customexercise__isnull=True)
+            return Exercise.objects.filter(customexercise__isnull=True).order_by('name')
 
         #Los standar y los custom del gym
         return Exercise.objects.filter(
             Q(customexercise__isnull=True) | Q(customexercise__gym_id=gym_id)
-        ).distinct()
+        ).distinct().order_by('name')
 
 
 
@@ -108,7 +108,7 @@ class CustomExerciseViewSet(viewsets.ModelViewSet):
 
         if self.action == 'list':
             gym_id = get_gym_id_param(self.request, required=True)
-            return CustomExercise.objects.filter(gym_id=gym_id)
+            return CustomExercise.objects.filter(gym_id=gym_id).order_by('name')
 
 
         return CustomExercise.objects.filter(gym__in=self.request.user.gyms.all())
@@ -146,7 +146,7 @@ class GymStandardExerciseVideoViewSet(viewsets.ModelViewSet):
         if self.action == 'list':
             gym_id = get_gym_id_param(self.request, required=True)
             # Retorna solo los videos de ese gimnasio
-            return GymStandardExerciseVideo.objects.filter(gym_id=gym_id)
+            return GymStandardExerciseVideo.objects.filter(gym_id=gym_id).order_by('id')
 
         # Para retrieve, update o destroy, busca en los gimnasios del usuario
         return GymStandardExerciseVideo.objects.filter(gym__in=self.request.user.gyms.all())
@@ -202,12 +202,21 @@ class RoutineViewSet(viewsets.ModelViewSet):
 
         qs = Routine.objects.visible_to(self.request.user)
 
+        if self.action in ['list', 'retrieve']:
+            # Todo lo que usa RoutineDetailSerializer, en un número fijo de queries (sin N+1)
+            blocks = ExerciseBlock.objects.select_related(
+                'exercise__muscle', 'exercise__customexercise',
+            ).prefetch_related('exercise__gym_videos')
+            qs = qs.select_related('gym', 'staff', 'person').prefetch_related(
+                Prefetch('blocks', queryset=blocks),
+            )
+
         if self.action == 'list':
             gym_id = get_gym_id_param(self.request)
             if gym_id:
                 qs = qs.filter(gym_id=gym_id)
 
-        return qs
+        return qs.order_by('id')
 
     def perform_create(self, serializer):
         """
