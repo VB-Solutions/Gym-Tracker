@@ -1,18 +1,35 @@
 from rest_framework import viewsets
+from rest_framework.permissions import IsAuthenticated
+
+from gym_tracker.permissions import IsAdminRole, IsStaffRole
+from gym_tracker.utils import get_gym_id_param
 
 from .models import User
 from .serializer import GymAdminSerializer, PersonSerializer, StaffMemberSerializer
 
 
 class _GymScopedUserViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Solo se ven los usuarios que comparten al menos un gimnasio con quien consulta.
+    - ?gym=<id> filtra por ese gimnasio (tiene que ser uno al que pertenezcas).
+    """
+    permission_classes = [IsAuthenticated]
     role = None
 
     def get_queryset(self):
-        qs = User.objects.filter(role=self.role).prefetch_related('gyms').order_by('email')
-        gym_id = self.request.query_params.get('gym')
-        if gym_id is not None and gym_id != '':
-            qs = qs.filter(gyms__id=gym_id).distinct()
-        return qs
+        # Swagger genera el schema con un usuario anónimo
+        if getattr(self, 'swagger_fake_view', False):
+            return User.objects.none()
+
+        gym_id = get_gym_id_param(self.request)
+        gyms = [gym_id] if gym_id else self.request.user.gyms.all()
+
+        return (
+            User.objects.filter(role=self.role, gyms__in=gyms)
+            .distinct()
+            .prefetch_related('gyms')
+            .order_by('email')
+        )
 
 
 class GymAdminViewSet(_GymScopedUserViewSet):
@@ -26,5 +43,7 @@ class StaffMemberViewSet(_GymScopedUserViewSet):
 
 
 class PersonViewSet(_GymScopedUserViewSet):
+    # Los socios no pueden listar a otros socios; solo STAFF o ADMIN
+    permission_classes = [IsAuthenticated, IsStaffRole | IsAdminRole]
     serializer_class = PersonSerializer
     role = User.Role.PERSON

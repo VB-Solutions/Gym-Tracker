@@ -36,7 +36,7 @@ class ExerciseSerializer(serializers.ModelSerializer):
 class CustomExerciseSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomExercise
-        fields = ('id', 'name', 'muscle', 'gym', 'video')
+        fields = ('id', 'name', 'description', 'muscle', 'gym', 'video')
         
     def validate_gym(self, value):
         if self.instance and self.instance.gym != value:
@@ -86,7 +86,9 @@ class RoutineSerializer(serializers.ModelSerializer):
     class Meta:
         model = Routine
         fields = ('id', 'name', 'gym', 'staff', 'person')
-        
+        # El staff lo asigna la View al crear (request.user); nadie puede cambiarlo por el JSON
+        read_only_fields = ('staff',)
+
         
     def __init__(self, *args, **kwargs):
         # Primero ejecutamos el constructor original
@@ -139,7 +141,7 @@ DRF buscará automáticamente una función llamada get_video_url para llenar est
         model = Exercise
         fields = ('id', 'name', 'muscle_name', 'video_url')
 
-    def get_video_url(self, obj):
+    def get_video_url(self, obj) -> str | None:
         # 1. Obtenemos el gimnasio desde el contexto (se lo pasaremos desde la View)
         gym = self.context.get('gym')
         if not gym:

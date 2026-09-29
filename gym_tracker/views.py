@@ -1,9 +1,9 @@
-from requests import request
 from rest_framework import viewsets , permissions , generics
 from rest_framework.decorators import api_view,permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from .permissions import IsStaffRole, IsAdminRole , IsPersonRole
+from .utils import get_gym_id_param
 from django.db.models import Q
 
 from .models import (
@@ -41,7 +41,10 @@ class GymViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = GymSerializer
     
     def get_queryset(self):
-        
+        # Swagger genera el schema con un usuario anónimo
+        if getattr(self, 'swagger_fake_view', False):
+            return Gym.objects.none()
+
         return self.request.user.gyms.all()
 
 
@@ -70,15 +73,12 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
     
     def get_queryset(self):
 
-        gym_id = self.request.query_params.get('gym')
-        
+        # Valida que ?gym sea numérico y que el usuario pertenezca a ese gym
+        gym_id = get_gym_id_param(self.request)
+
         #No se manda gym
         if not gym_id:
             return Exercise.objects.filter(customexercise__isnull=True)
-            
-       # Se manda un gym en el que no estoy
-        if not self.request.user.gyms.filter(id=gym_id).exists():
-            raise PermissionDenied("No tienes acceso a los ejercicios de este gimnasio.")
 
         #Los standar y los custom del gym
         return Exercise.objects.filter(
@@ -101,23 +101,19 @@ class CustomExerciseViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         # Si intentan actualizar, borrar o crear, exigimos que sean STAFF o ADMIN
         if self.action in ['update', 'partial_update', 'destroy', 'create']:
-            return [IsAuthenticated(), IsStaffRole() | IsAdminRole()]
-        
+            return [IsAuthenticated(), (IsStaffRole | IsAdminRole)()]
+
         return [IsAuthenticated()]
-    
+
     def get_queryset(self):
         """
         Controla qué registros de la base de datos están disponibles.
         """
+        if getattr(self, 'swagger_fake_view', False):
+            return CustomExercise.objects.none()
+
         if self.action == 'list':
-            gym_id = self.request.query_params.get('gym')
-            
-            if not gym_id:
-                raise ValidationError({"gym": "Debes pasar un id de gimnasio en la URL (?gym=X)."})
-                
-            if not self.request.user.gyms.filter(id=gym_id).exists():
-                raise PermissionDenied("Debes pasar un id de gimnasio al que pertenezcas.")
-                
+            gym_id = get_gym_id_param(self.request, required=True)
             return CustomExercise.objects.filter(gym_id=gym_id)
 
 
@@ -151,24 +147,19 @@ class GymStandardExerciseVideoViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         # Si intentan actualizar, borrar o crear, exigimos que sean STAFF o ADMIN
         if self.action in ['update', 'partial_update', 'destroy', 'create']:
-            return [IsAuthenticated(), IsStaffRole() | IsAdminRole()]
-        
+            return [IsAuthenticated(), (IsStaffRole | IsAdminRole)()]
+
         return [IsAuthenticated()]
-    
+
     def get_queryset(self):
         """
         Controla qué registros de la base de datos están disponibles.
         """
+        if getattr(self, 'swagger_fake_view', False):
+            return GymStandardExerciseVideo.objects.none()
+
         if self.action == 'list':
-            gym_id = self.request.query_params.get('gym')
-            
-            
-            if not gym_id:
-                raise ValidationError({"gym": "Debes pasar un id de gimnasio en la URL (?gym=X)."})
-            
-            if not self.request.user.gyms.filter(id=gym_id).exists():
-                raise PermissionDenied("Debes solicitar un id de gimnasio al que pertenezcas.")
-                
+            gym_id = get_gym_id_param(self.request, required=True)
             # Retorna solo los videos de ese gimnasio
             return GymStandardExerciseVideo.objects.filter(gym_id=gym_id)
 
@@ -217,21 +208,19 @@ class RoutineViewSet(viewsets.ModelViewSet):
     
     def get_permissions(self):
         # Si la acción es CREAR, solo STAFF o ADMIN
-        if self.action == 'create':
-            return [IsAuthenticated(), IsStaffRole() | IsAdminRole()]
-            
-        # Si la acción es EDITAR o BORRAR...
-        if self.action in ['update', 'partial_update', 'destroy']:
+        if self.action in ['create', 'destroy']:
+            return [IsAuthenticated(), (IsStaffRole | IsAdminRole)()]
 
-            return [IsAuthenticated()] 
-            
-        # Para listar y ver detalle (GET)
+        # Para listar, ver detalle y EDITAR (el queryset ya limita a las rutinas de cada rol)
         return [IsAuthenticated()]
 
     def get_queryset(self):
         """
         Filtra las rutinas según el rol del usuario y el gimnasio solicitado.
         """
+        if getattr(self, 'swagger_fake_view', False):
+            return Routine.objects.none()
+
         user = self.request.user
         role = user.role
         
@@ -240,15 +229,8 @@ class RoutineViewSet(viewsets.ModelViewSet):
 
         # Comportamiento para listar (GET /routines/)
         if self.action == 'list':
-            gym_id = self.request.query_params.get('gym')
-            
-            # 1. Validación: Obligar a mandar el gimnasio
-            if not gym_id:
-                raise ValidationError({"gym": "Debes pasar un id de gimnasio en la URL (?gym=X)."})
-                
-            # 2. Seguridad: ¿Pertenece a ese gimnasio?
-            if not user.gyms.filter(id=gym_id).exists():
-                raise PermissionDenied("No tienes acceso a las rutinas de este gimnasio.")
+            # 1 y 2. Obligar a mandar el gimnasio y validar que pertenezca a él
+            gym_id = get_gym_id_param(self.request, required=True)
 
             # 3. Filtrar según el ROL sobre ese gimnasio específico
             if role == 'PERSON':
@@ -331,8 +313,8 @@ class GetAllRoutinesView(generics.ListAPIView):
     def get_queryset(self):
         
         user = self.request.user
-        gym_id = self.request.query_params.get('gym')
-        
+        gym_id = get_gym_id_param(self.request)
+
         #si person
         if user.role == 'PERSON':
             qs = Routine.objects.filter(person=user)
