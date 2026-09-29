@@ -1,48 +1,100 @@
 # Estado actual y roadmap
 
-Última revisión: 29/09/2026, después de corregir los bugs críticos y limpiar el repo (rama `fix/critical-and-cleanup`).
+Última revisión: 29/09/2026, después de completar el roadmap del backend (rama `feat/backend-roadmap`).
 
 ## Resumen
 
-- **El backend es un prototipo que funciona por API.** Se pueden leer y escribir gimnasios, ejercicios, videos y rutinas, con permisos por rol y por gimnasio. Pero no hay endpoint de login, así que solo se puede usar con Basic Auth o con la sesión del admin.
-- **El frontend son pantallas estáticas.** Login, Register y Home existen, pero no llaman a la API.
-- **Lo que falta para que la app funcione de punta a punta** es la prioridad P0 de este documento: auth por API, la capa de API en el cliente y la gestión de usuarios y bloques de rutina.
+- **El backend está completo para un primer uso real.**
+  - Registro y login con JWT.
+  - Roles por gimnasio, y un ADMIN que gestiona a los miembros de su gimnasio.
+  - Ejercicios estándar y propios, videos, y rutinas con sus bloques de ejercicios.
+  - Tests y CI en GitHub Actions.
+- **El frontend sigue siendo solo pantallas estáticas.** Conectarlo a la API es lo principal que falta (P0).
+- **Falta definir dónde se despliega.** Con eso se sigue con PostgreSQL y el servidor de producción (P1).
 
 ## Estado actual
 
-### Backend: endpoints y permisos
+### Roles
 
-Todos los endpoints requieren estar autenticado, salvo el schema y Swagger. `?gym=<id>` tiene que ser un número y un gimnasio al que pertenezcas; si no, la respuesta es 400 o 403.
+El rol es **por gimnasio** (`users.GymMembership`): un usuario puede ser STAFF en un gimnasio y socio en otro. Si deja un gimnasio, deja de ver lo de ese gimnasio.
+
+| Rol | Puede |
+|---|---|
+| ADMIN | Todo lo de STAFF, más: ver todas las rutinas del gym, asignarle una rutina a cualquier entrenador y gestionar los miembros |
+| STAFF | Crear ejercicios propios, videos y rutinas; editar las rutinas que armó y sus bloques |
+| PERSON | Ver sus rutinas con sus bloques y renombrarlas |
+
+### Endpoints
+
+Todos los endpoints requieren un token JWT (`Authorization: Bearer <access>`), salvo login, refresh, registro, el schema y Swagger.
+
+- **Paginación:** los listados vienen paginados (`{count, next, previous, results}`, 20 por página, `?page_size` hasta 100).
+- **`?gym=<id>`:** tiene que ser un número (si no, 400) y un gimnasio al que pertenezcas (si no, 403).
+
+**Autenticación (`/users/`)**
+
+| Endpoint | Qué hace |
+|---|---|
+| `POST auth/register/` | Alta pública con email, contraseña, nombre y apellido. El usuario queda sin gimnasios |
+| `POST auth/login/`, `POST auth/refresh/` | Tokens JWT: el access dura 30 minutos y el refresh 7 días. Máximo 20 pedidos por minuto |
+| `GET/PATCH me/` | El usuario logueado, con sus gimnasios y su rol en cada uno. Se puede editar el nombre |
+
+**Usuarios y miembros (`/users/`)**
 
 | Endpoint | Lectura | Escritura |
 |---|---|---|
-| `/gym_tracker/gyms/` | Tus gimnasios | — |
-| `/gym_tracker/muscles/` | Todos | — |
-| `/gym_tracker/exercises/` | Estándar; con `?gym` suma los propios de ese gym | — |
-| `/gym_tracker/custom-exercises/` | Listar exige `?gym` | STAFF o ADMIN, en su gym |
-| `/gym_tracker/gym-standard-exercise-videos/` | Listar exige `?gym` | STAFF o ADMIN, en su gym |
-| `/gym_tracker/routines/` | Listar exige `?gym`. PERSON ve las suyas, STAFF las que creó, ADMIN todas las del gym | Crear y borrar: STAFF o ADMIN. Editar: cualquiera dentro de su alcance; el PERSON solo la suya, y no puede cambiar el `staff` |
-| `/gym_tracker/routines/all/` | Igual que el listado, con `?gym` opcional | — |
-| `/users/admins/`, `/users/staff/` | Usuarios que comparten gimnasio con vos | — |
-| `/users/people/` | Solo STAFF o ADMIN; socios que comparten gimnasio | — |
-| `/gym_tracker/api/schema/`, `/gym_tracker/docs/` | Público | — |
+| `memberships/` | ADMIN: las membresías de sus gimnasios | ADMIN: sumar por email, cambiar el rol, sacar. El gym siempre queda con al menos un ADMIN |
+| `admins/`, `staff/` | Usuarios con ese rol en tus gimnasios | — |
+| `people/` | Solo STAFF o ADMIN: socios de los gimnasios donde tienen ese rol | — |
 
-### Backend: modelo de datos
+**Gimnasios y ejercicios (`/gym_tracker/`)**
 
-- **`Gym`**: gimnasio.
-- **`Muscle`**: músculo, con su zona.
-- **`Exercise`**: ejercicio estándar global, ligado a un músculo.
-- **`CustomExercise`**: hereda de `Exercise` y pertenece a un gym. Puede tener video.
-- **`GymStandardExerciseVideo`**: el video que un gym le pone a un ejercicio estándar. Es único por gym y ejercicio.
-- **`Routine`**: rutina de un gym, armada por un STAFF para un PERSON.
-- **`ExerciseBlock`**: un ejercicio dentro de una rutina, con día, orden y `series_data` (JSON). La combinación rutina, día y orden es única.
-- **`users.User`**: login por email, un `role` global (ADMIN, STAFF o PERSON) y una relación M2M con `Gym`.
+| Endpoint | Lectura | Escritura |
+|---|---|---|
+| `gyms/` | Tus gimnasios | Desde el admin de Django |
+| `muscles/` | Todos | Desde el admin de Django |
+| `exercises/` | Los estándar; con `?gym` suma los propios de ese gym | Desde el admin de Django |
+| `custom-exercises/` | Listar exige `?gym` | STAFF o ADMIN del gym. El nombre es único por gym. No se puede borrar si está en una rutina |
+| `gym-standard-exercise-videos/` | Listar exige `?gym` | STAFF o ADMIN del gym. Un video por ejercicio estándar y gym |
 
-### Backend: calidad
+**Rutinas (`/gym_tracker/`)**
 
-- 14 tests de API en `gym_tracker/tests.py` y `users/tests.py`. Cubren permisos, el parámetro `?gym` y la generación del schema.
-- `manage.py check` no reporta problemas, no hay migraciones pendientes y el schema OpenAPI valida sin warnings.
-- La autenticación es la que DRF trae por defecto: sesión y Basic. No hay endpoints de login, registro ni token.
+| Endpoint | Lectura | Escritura |
+|---|---|---|
+| `routines/` | Las que podés ver según tu rol; `?gym` opcional. Incluye los bloques con el video que corresponde a ese gym | Crear y borrar: STAFF o ADMIN. Editar: solo el nombre |
+| `exercise-blocks/` | Listar exige `?routine` | STAFF o ADMIN del gym de la rutina |
+
+Además, públicos:
+
+- `/gym_tracker/api/schema/`: el schema OpenAPI.
+- `/gym_tracker/docs/`: Swagger, donde el token se carga con el botón **Authorize**.
+
+### Modelo de datos
+
+- **`Gym`**: gimnasio. El nombre es único sin importar mayúsculas.
+- **`Muscle`**: músculo, con su zona. El nombre es único sin importar mayúsculas.
+- **`Exercise`**: ejercicio estándar global. Si se borra el músculo, el ejercicio queda sin músculo.
+- **`CustomExercise`**: ejercicio propio de un gym. Hereda de `Exercise`, el gym es obligatorio y puede tener video.
+- **`GymStandardExerciseVideo`**: el video que un gym le pone a un ejercicio estándar.
+- **`Routine`**: rutina de un gym, armada por un STAFF o ADMIN para un PERSON de ese gym.
+- **`ExerciseBlock`**: un ejercicio dentro de una rutina.
+  - Tiene día, orden y `series_data`, con formato `[{"repe": 12, "peso": 50}, ...]`.
+  - Día y orden empiezan en 1, y la combinación rutina, día y orden es única.
+  - Un ejercicio que está en una rutina no se puede borrar.
+- **`users.User`**: login por email. Su relación con `Gym` pasa por **`GymMembership`** (usuario, gimnasio, rol), única por usuario y gimnasio.
+
+### Calidad
+
+- **67 tests** en `gym_tracker/tests.py` y `users/tests.py`. Cubren:
+  - permisos por rol y por gimnasio;
+  - el flujo JWT y el throttling;
+  - la gestión de miembros;
+  - las validaciones;
+  - que la cantidad de queries de las rutinas no crezca;
+  - las migraciones con datos (`users.0002` y `gym_tracker.0010`);
+  - el admin de usuarios.
+- **CI en GitHub Actions:** system check, migraciones pendientes, schema OpenAPI y tests.
+- **Producción:** `check --deploy` solo marca W005 y W021 (HSTS para subdominios y preload). Quedan apagados a propósito hasta conocer el dominio.
 
 ### Frontend
 
@@ -51,63 +103,48 @@ Todos los endpoints requieren estar autenticado, salvo el schema y Swagger. `?gy
   - `/register` muestra Register.
   - `/home` muestra 5 tarjetas de ejemplo.
   - `*` muestra la página de error.
-- **Sin conexión a la API.**
-  - Los handlers de login y registro están vacíos.
-  - No hay cliente HTTP.
-  - No hay contexto de autenticación.
-  - `/home` es pública.
+- **Sin conexión a la API.** No hay cliente HTTP, los handlers de login y registro están vacíos y `/home` es pública.
 - `npm run build` funciona. `npm run lint` marca 7 problemas: 5 errores y 2 warnings (detalle en P2).
 
 ## Trabajo futuro
 
-### P0: que la app funcione de punta a punta
+### P0: conectar el frontend
 
-1. **Auth por API.**
-   - Agregar `djangorestframework-simplejwt` con login y refresh.
-   - Crear un endpoint de registro con email, contraseña, nombre y apellido. El rol por defecto es PERSON.
-   - Crear un endpoint `me`.
-   - En `REST_FRAMEWORK`, definir `DEFAULT_AUTHENTICATION_CLASSES` y `DEFAULT_PERMISSION_CLASSES = [IsAuthenticated]`, para que un endpoint nuevo no quede público por olvido.
-2. **Capa de API en el cliente.**
-   - Agregar `axios` con la base URL en `VITE_API_URL`.
-   - Guardar el token y refrescarlo.
-   - Crear un contexto de auth, rutas protegidas y logout.
-   - Conectar los formularios de Login y Register. Faltan campos: el `User` tiene `first_name` y `last_name`, y Register solo pide email y contraseña.
-   - `axios`, `react-hook-form` y `react-hot-toast` estaban en un `package.json` suelto en la raíz; hay que instalarlos en `client/`.
-3. **Gestión de usuarios y membresías.**
-   - `users/admin.py` está vacío: registrar `User` en el admin.
-   - Crear endpoints para que un ADMIN sume STAFF y socios a su gimnasio. Hoy solo se puede desde el shell.
-4. **API de `ExerciseBlock`.** Está comentada en `gym_tracker/views.py:292`. Sin ella las rutinas creadas por API quedan vacías; los bloques solo se cargan desde el admin.
-5. **Pantallas del frontend** para gimnasios, ejercicios y rutinas, según el rol.
+1. **Capa de API en `client/`.**
+   - `axios` con la base URL en `VITE_API_URL`.
+   - Guardar los tokens de `/users/auth/login/` y refrescarlos con `/users/auth/refresh/` cuando el access vence (401).
+   - `axios`, `react-hook-form` y `react-hot-toast` estaban en el `package.json` suelto que se borró de la raíz; hay que instalarlos en `client/`.
+2. **Auth en la UI.**
+   - Contexto de auth con `/users/me/`, rutas protegidas y logout.
+   - Conectar Login y Register. Al Register le faltan los campos de nombre y apellido.
+3. **Pantallas según el rol en cada gym**, que está en `me.gyms[].role`:
+   - PERSON: sus rutinas.
+   - STAFF: ejercicios, videos, y rutinas con sus bloques.
+   - ADMIN: además, gestión de miembros.
+   - Los listados vienen paginados.
 
-### P1: correcciones de modelo y API
+### P1: despliegue y backend pendiente
 
-**Modelo de datos**
-- **El rol es global.** Un usuario no puede ser STAFF en un gym y socio en otro. Reemplazar `role` más la M2M por un modelo de membresía (`user`, `gym`, `role`).
-- **`on_delete` demasiado agresivo.**
-  - Borrar un `Muscle` borra sus ejercicios. Debería ser `SET_NULL`; el campo ya es nullable.
-  - Borrar un `Exercise` borra bloques de rutinas de socios. Debería ser `PROTECT`.
-- **`CustomExercise.gym` es nullable.** Un ejercicio propio sin gym no aparece en ningún endpoint.
-- Faltan restricciones de unicidad en los nombres de `Gym`, `Muscle` y `Exercise`.
-- Falta validar el formato de `series_data`.
+**Despliegue**
+- Elegir el hosting.
+- Pasar a PostgreSQL: `psycopg` más configuración por variable de entorno, por ejemplo `DATABASE_URL`.
+- Servidor WSGI (gunicorn) y archivos estáticos (`collectstatic`, o whitenoise).
+- Decidir `SECURE_HSTS_INCLUDE_SUBDOMAINS` y `SECURE_HSTS_PRELOAD` según el dominio.
 
-**API**
-- **`video_url` siempre vuelve `null`.** `ExerciseInBlockSerializer.get_video_url` (`gym_tracker/serializer.py:146`) espera `context['gym']`, y ninguna vista lo pasa. Hay que pasar el gym de la rutina.
-- **Consultas N+1 al leer rutinas.** Agregar `select_related('gym', 'staff', 'person')` y `prefetch_related('blocks__exercise__muscle', 'blocks__exercise__customexercise')`.
-- **No hay paginación.** Configurar una por defecto en `REST_FRAMEWORK`.
+**Auth y cuentas**
+- **Logout real.** Hoy el cliente descarta los tokens, pero el refresh sigue valiendo hasta que vence. Se resuelve con la app `token_blacklist` de SimpleJWT.
+- **Recuperar contraseña por email.** Hace falta configurar el envío de emails.
+- **Email sin distinguir mayúsculas.** El registro ya rechaza emails repetidos sin importar mayúsculas, pero el login compara exacto. Guardar el email en minúsculas o hacer que el login no distinga mayúsculas.
 
-**Permisos y validaciones de rutinas y videos**
-- **Videos de ejercicios estándar.** Hoy se puede asignar un video a un ejercicio propio, incluso de otro gym (`gym_tracker/views.py:164`). Validar que el ejercicio sea estándar.
-- **Un ADMIN que crea una rutina queda guardado como `staff`** (`gym_tracker/views.py:269`), aunque el campo está pensado para STAFF.
-- **Acceso tras dejar el gym.** Un PERSON o STAFF que deja un gym sigue viendo sus rutinas de ese gym, porque el detalle no chequea la membresía.
-- **Editar una rutina vuelve a validar la membresía del socio** (`gym_tracker/views.py:284`). Si el socio dejó el gym, la rutina ya no se puede ni renombrar.
-- **Chequeos que nunca se ejecutan.** Los de "cambio de gym" en `gym_tracker/views.py:125` y `:280` no corren, porque `gym` es de solo lectura al editar.
+**Datos**
+- **Alta de gimnasios.** Hoy solo el superusuario los crea desde el admin. Si hace falta que un dueño de gimnasio se dé de alta solo, agregar un endpoint que cree el gym y la membresía ADMIN.
+- **Nombres de ejercicios estándar.** No tienen restricción de unicidad: los carga el superusuario desde el admin, y la herencia de `CustomExercise` impide una constraint en la base.
 
-### P2: mantenimiento
+### P2: mejoras
 
-**Backend**
-- **Migraciones `gym_tracker` 0001–0003.** Son restos de un modelo `Task` de tutorial y se pueden aplastar con squash. Con cuidado: ya están aplicadas.
-- **`GetAllRoutinesView` duplica el listado de rutinas** (`gym_tracker/views.py:299`). Pasarla a un `@action` de `RoutineViewSet` o eliminarla.
-- **`LANGUAGE_CODE` es `en-us`**, pero todos los mensajes de la API están en español.
+**Producto**
+- **Registro de entrenamientos.** Hoy `series_data` es lo que el entrenador indica. Si el socio va a anotar lo que hizo (repeticiones y peso reales, por fecha), conviene un modelo aparte en vez de editar la rutina.
+- **Throttling general de la API.** Hoy solo están limitados login, refresh y registro.
 
 **Frontend: estructura**
 - Crear una ruta de layout con `<Outlet/>`. Hoy cada vista repite Navbar y Footer.
@@ -136,12 +173,28 @@ Todos los endpoints requieren estar autenticado, salvo el schema y Swagger. `?gy
 - Dependencias sin usar: `lucide-react` y `vite-plugin-svgr`.
 - Componentes sin usar: `tilt.tsx` y `button-group.tsx`.
 - `components.json:7` apunta a `tailwind.config.js`, que ya no existe.
+- **CI del frontend:** `npm run lint` y `npm run build`, en un workflow aparte del backend.
 
-**Infra**
-- **CI**, por ejemplo con GitHub Actions: `python manage.py test`, `npm run lint` y `npm run build`.
-- **Producción:**
-  - Resolver los warnings de `manage.py check --deploy`: HTTPS, HSTS y cookies seguras.
-  - Pasar a PostgreSQL.
-  - Configurar `STATIC_ROOT`.
-  - Usar un servidor WSGI/ASGI como gunicorn o uvicorn.
-  - Si se usa auth por sesión, configurar `CSRF_TRUSTED_ORIGINS`.
+## Hecho
+
+**Rama `fix/critical-and-cleanup`**
+- Errores 500 en las escrituras por permisos mal combinados.
+- `/users/` ya no es público.
+- `?gym` inválido devuelve 400.
+- CORS configurado.
+- Limpieza del repo y settings por variables de entorno.
+
+**Rama `feat/backend-roadmap`**
+- **Roles y auth:** roles por gimnasio, auth JWT, gestión de miembros y admin de usuarios.
+- **API:**
+  - API de bloques de rutina con validación de `series_data`.
+  - `video_url` corregido, sin N+1 en las rutinas, y paginación.
+  - Validación de videos.
+  - Permisos de rutinas: acceso solo mientras se pertenece al gym, y renombrar una rutina después de que el socio se fue.
+  - Se eliminó el endpoint duplicado `/routines/all/`.
+- **Datos:** `on_delete` corregidos, gym obligatorio en ejercicios propios y nombres únicos.
+- **Mantenimiento:**
+  - Squash de las migraciones de tutorial.
+  - Mensajes en español.
+  - Settings de producción.
+  - CI.
