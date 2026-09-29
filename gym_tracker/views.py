@@ -2,7 +2,7 @@ from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
 from .permissions import IsGymStaffOrAdminOrReadOnly
-from .utils import get_gym_id_param, require_gym_role
+from .utils import get_gym_id_param, get_int_param, require_gym_role
 from django.db.models import Q
 
 from users.models import Role
@@ -10,6 +10,7 @@ from users.models import Role
 from .models import (
     CustomExercise,
     Exercise,
+    ExerciseBlock,
     Gym,
     GymStandardExerciseVideo,
     Muscle,
@@ -17,6 +18,7 @@ from .models import (
 )
 from .serializer import (
     CustomExerciseSerializer,
+    ExerciseBlockSerializer,
     ExerciseSerializer,
     GymSerializer,
     GymStandardExerciseVideoSerializer,
@@ -235,7 +237,38 @@ class RoutineViewSet(viewsets.ModelViewSet):
 
 
 
+class ExerciseBlockViewSet(viewsets.ModelViewSet):
+    """
+    Ejercicios de una rutina, cada uno con su día, orden y series.
+    - GET /exercise-blocks/?routine=<id> -> Los bloques de esa rutina, por día y orden (?routine es OBLIGATORIO al listar).
+    - GET /exercise-blocks/<id>/ -> Detalle de un bloque.
+    - POST /exercise-blocks/ {routine, exercise, day_number, order, series_data} -> Solo STAFF o ADMIN del gym de la rutina.
+    - PUT/PATCH /exercise-blocks/<id>/ -> Edita ejercicio, día, orden o series (Solo STAFF o ADMIN del gym).
+    - DELETE /exercise-blocks/<id>/ -> Elimina el bloque (Solo STAFF o ADMIN del gym).
+    Solo se ven y se editan bloques de rutinas que el usuario puede ver.
+    """
+    serializer_class = ExerciseBlockSerializer
+    # Editar y borrar: STAFF o ADMIN del gym de la rutina (ExerciseBlock.gym_id)
+    permission_classes = [IsAuthenticated, IsGymStaffOrAdminOrReadOnly]
 
-# class ExerciseBlockViewSet(viewsets.ModelViewSet):
-#     queryset = ExerciseBlock.objects.all()
-#     serializer_class = ExerciseBlockSerializer
+    def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return ExerciseBlock.objects.none()
+
+        qs = ExerciseBlock.objects.filter(
+            routine__in=Routine.objects.visible_to(self.request.user),
+        ).select_related('routine', 'exercise')
+
+        if self.action == 'list':
+            qs = qs.filter(routine_id=get_int_param(self.request, 'routine', required=True))
+
+        return qs
+
+    def perform_create(self, serializer):
+        require_gym_role(
+            self.request.user,
+            serializer.validated_data['routine'].gym_id,
+            [Role.STAFF, Role.ADMIN],
+            "Solo STAFF o ADMIN de este gimnasio pueden armar rutinas.",
+        )
+        serializer.save()

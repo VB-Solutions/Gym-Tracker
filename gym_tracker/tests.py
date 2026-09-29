@@ -4,7 +4,7 @@ from rest_framework.test import APITestCase
 
 from users.models import GymMembership, Role, User
 
-from .models import CustomExercise, Gym, Muscle, Routine
+from .models import CustomExercise, Exercise, ExerciseBlock, Gym, Muscle, Routine
 
 
 class GymTrackerAPITestCase(APITestCase):
@@ -184,6 +184,99 @@ class RoutineTests(GymTrackerAPITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+
+class ExerciseBlockTests(GymTrackerAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.routine = Routine.objects.create(
+            name='Fuerza', gym=self.gym, staff=self.staff, person=self.person
+        )
+        self.exercise = Exercise.objects.create(name='Sentadilla', description='Con barra')
+
+    def _payload(self, **extra):
+        return {
+            'routine': self.routine.id,
+            'exercise': self.exercise.id,
+            'day_number': 1,
+            'order': 1,
+            'series_data': [{'repe': 12, 'peso': 50}, {'repe': 10}],
+            **extra,
+        }
+
+    def _create(self, **extra):
+        return self.client.post(reverse('exercise-block-list'), self._payload(**extra), format='json')
+
+    def test_staff_adds_block_and_it_shows_in_the_routine(self):
+        self.client.force_authenticate(self.staff)
+
+        response = self._create()
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['exercise_name'], 'Sentadilla')
+
+        self.client.force_authenticate(self.person)
+        routine = self.client.get(reverse('routine-detail', args=[self.routine.id]))
+        self.assertEqual(routine.data['blocks'][0]['series_data'], [{'repe': 12, 'peso': 50}, {'repe': 10}])
+
+    def test_person_can_read_but_not_write_blocks(self):
+        block = ExerciseBlock.objects.create(routine=self.routine, exercise=self.exercise, day_number=1, order=1)
+        self.client.force_authenticate(self.person)
+
+        listing = self.client.get(reverse('exercise-block-list'), {'routine': self.routine.id})
+        self.assertEqual([item['id'] for item in listing.data], [block.id])
+
+        self.assertEqual(self._create(order=2).status_code, status.HTTP_403_FORBIDDEN)
+        response = self.client.patch(reverse('exercise-block-detail', args=[block.id]), {'order': 5})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_cannot_add_blocks_to_a_routine_you_cannot_see(self):
+        # other_staff es STAFF del gym pero la rutina es de staff
+        self.client.force_authenticate(self.other_staff)
+
+        response = self._create()
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('routine', response.data)
+
+    def test_custom_exercise_must_belong_to_the_routine_gym(self):
+        foreign = CustomExercise.objects.create(name='Ajeno', description='x', gym=self.other_gym)
+        self.client.force_authenticate(self.staff)
+
+        response = self._create(exercise=foreign.id)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('exercise', response.data)
+
+    def test_day_and_order_are_unique_per_routine(self):
+        self.client.force_authenticate(self.staff)
+        self._create()
+
+        response = self._create()
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_invalid_series_data_returns_400(self):
+        self.client.force_authenticate(self.staff)
+
+        for series_data in ['12x50', [{'repe': 0}], [{'repe': 10, 'peso': -5}], [{'reps': 10}], [{'repe': True}]]:
+            with self.subTest(series_data=series_data):
+                response = self._create(series_data=series_data)
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertIn('series_data', response.data)
+
+    def test_day_and_order_start_at_one(self):
+        self.client.force_authenticate(self.staff)
+
+        self.assertEqual(self._create(day_number=0).status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(self._create(order=0).status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_listing_requires_routine_param(self):
+        self.client.force_authenticate(self.staff)
+
+        self.assertEqual(self.client.get(reverse('exercise-block-list')).status_code, status.HTTP_400_BAD_REQUEST)
+        response = self.client.get(reverse('exercise-block-list'), {'routine': 'abc'})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
 class GymQueryParamTests(GymTrackerAPITestCase):

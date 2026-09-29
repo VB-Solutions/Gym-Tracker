@@ -1,6 +1,25 @@
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 
+def get_int_param(request, name, required=False):
+    """
+    Lee el query param ?<name>=<id> como entero.
+    - Si no viene: devuelve None (o 400 si es obligatorio).
+    - Si no es un número: 400.
+    """
+    raw_value = request.query_params.get(name)
+
+    if not raw_value:
+        if required:
+            raise ValidationError({name: f"Debes pasar un id en la URL (?{name}=X)."})
+        return None
+
+    try:
+        return int(raw_value)
+    except ValueError:
+        raise ValidationError({name: "El id debe ser un número."})
+
+
 def get_gym_id_param(request, required=False):
     """
     Lee el query param ?gym=<id> y lo valida.
@@ -8,19 +27,9 @@ def get_gym_id_param(request, required=False):
     - Si no es un número: 400.
     - Si el usuario no pertenece a ese gimnasio: 403.
     """
-    raw_gym_id = request.query_params.get('gym')
+    gym_id = get_int_param(request, 'gym', required=required)
 
-    if not raw_gym_id:
-        if required:
-            raise ValidationError({"gym": "Debes pasar un id de gimnasio en la URL (?gym=X)."})
-        return None
-
-    try:
-        gym_id = int(raw_gym_id)
-    except ValueError:
-        raise ValidationError({"gym": "El id de gimnasio debe ser un número."})
-
-    if not request.user.gyms.filter(id=gym_id).exists():
+    if gym_id is not None and not request.user.gyms.filter(id=gym_id).exists():
         raise PermissionDenied("No tienes acceso a este gimnasio.")
 
     return gym_id

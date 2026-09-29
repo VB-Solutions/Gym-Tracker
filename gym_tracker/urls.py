@@ -15,6 +15,7 @@ router.register(
     basename='gym-standard-exercise-video',
 )
 router.register(r'routines', views.RoutineViewSet, basename='routine')
+router.register(r'exercise-blocks', views.ExerciseBlockViewSet, basename='exercise-block')
 
 urlpatterns = [
     # 1. Rutas generadas por el Router

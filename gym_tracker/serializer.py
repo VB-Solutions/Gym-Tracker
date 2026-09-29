@@ -125,7 +125,47 @@ class RoutineSerializer(serializers.ModelSerializer):
 
 
 
-        
+class ExerciseBlockSerializer(serializers.ModelSerializer):
+    """
+    Para crear/editar los ejercicios de una rutina.
+    series_data: [{"repe": 12, "peso": 50}, ...] (ver validators.validate_series_data).
+    """
+    exercise_name = serializers.CharField(source='exercise.name', read_only=True)
+
+    class Meta:
+        model = ExerciseBlock
+        fields = ('id', 'routine', 'exercise', 'exercise_name', 'day_number', 'order', 'series_data')
+        extra_kwargs = {
+            'day_number': {'min_value': 1},
+            'order': {'min_value': 1},
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Solo se pueden elegir rutinas que el usuario puede ver
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            self.fields['routine'].queryset = Routine.objects.visible_to(request.user)
+
+        # Un bloque no se puede mover a otra rutina
+        if self.instance is not None:
+            self.fields['routine'].read_only = True
+
+    def validate(self, attrs):
+        routine = attrs.get('routine') or self.instance.routine
+        exercise = attrs.get('exercise') or self.instance.exercise
+
+        # Estándar, o propio del mismo gimnasio de la rutina
+        custom = CustomExercise.objects.filter(pk=exercise.pk).first()
+        if custom and custom.gym_id != routine.gym_id:
+            raise serializers.ValidationError(
+                {"exercise": "El ejercicio propio tiene que ser del mismo gimnasio de la rutina."}
+            )
+
+        return attrs
+
+
 class ExerciseInBlockSerializer(serializers.ModelSerializer):
     """
     Este serializer extrae la información del ejercicio 

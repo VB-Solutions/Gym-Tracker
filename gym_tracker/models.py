@@ -1,6 +1,8 @@
 from django.conf import settings
 from django.db import models
 
+from .validators import validate_series_data
+
 # ----------------- GIMNASIOS  -----------------
 
 class Gym(models.Model):
@@ -143,7 +145,7 @@ class ExerciseBlock(models.Model):
     day_number = models.IntegerField()
 
     order = models.SmallIntegerField()
-    series_data = models.JSONField(default=list)
+    series_data = models.JSONField(default=list, blank=True, validators=[validate_series_data])
 
     class Meta:
         ordering = ['routine', 'day_number', 'order']
@@ -165,7 +167,13 @@ class ExerciseBlock(models.Model):
     def __str__(self):
         return f'{self.routine} / día {self.day_number} / {self.exercise}'
 
-    # Ejemplo de lo que guardarías en series_data desde el Frontend:
+    @property
+    def gym_id(self):
+        # Para que los permisos por gimnasio funcionen igual que con el resto de los objetos
+        return self.routine.gym_id
+
+    # Ejemplo de lo que guardarías en series_data desde el Frontend
+    # (lo valida validators.validate_series_data):
     # [
     #   {"repe": 12, "peso": 50},
     #   {"repe": 10, "peso": 55},
