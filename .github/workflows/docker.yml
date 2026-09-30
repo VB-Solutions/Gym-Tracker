@@ -6,6 +6,11 @@ on:
     paths-ignore: ['**.md']
   workflow_dispatch:
 
+# Igual que en backend.yml: un run por rama, sin cancelar los de main
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   build:
     runs-on: ubuntu-latest

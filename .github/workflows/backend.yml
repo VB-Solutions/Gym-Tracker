@@ -5,6 +5,12 @@ on:
     paths-ignore: ['client/**', '**.md']
   workflow_dispatch:
 
+# Un run por rama a la vez: si llega otro (push seguido, o GitHub que entrega el evento dos veces)
+# cancela al anterior. En main no se cancela, se encola: cada commit de main queda probado
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
