@@ -107,7 +107,7 @@ Cambiar `VITE_API_URL` requiere un nuevo deploy de la web, porque el valor queda
 ## Notas
 
 - **HSTS:** con `DJANGO_DEBUG=False` la API manda HSTS por 30 días (`DJANGO_HSTS_SECONDS`). Los navegadores recuerdan que el dominio es solo HTTPS, así que conviene tener el certificado funcionando antes de apuntar el dominio definitivo.
-- **Throttling de login y registro:** el límite (20 por minuto) se guarda en la memoria de cada proceso de gunicorn. Con 3 procesos, el límite real es hasta 3 veces mayor. Ver el [roadmap](ROADMAP.md).
+- **Throttling de login y registro:** el límite (20 por minuto) se cuenta en una tabla de PostgreSQL (`django_cache`), compartida por todos los procesos de gunicorn. El contenedor la crea al arrancar con `createcachetable`.
 - **Backups:** se configuran en el recurso de PostgreSQL (**Backups**) de Coolify.
 
 ## Probar las imágenes en local

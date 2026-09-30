@@ -124,6 +124,15 @@ if os.environ.get('DATABASE_URL'):
             conn_health_checks=True,
         ),
     }
+    # gunicorn corre varios procesos: el cache (lo usa el límite de login/registro) tiene que ser
+    # compartido entre todos, si no cada proceso cuenta por su lado. Se guarda en la misma base,
+    # sin sumar Redis. La tabla la crea `manage.py createcachetable` (docker-entrypoint.sh)
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+            'LOCATION': 'django_cache',
+        },
+    }
 else:
     DATABASES = {
         'default': {

@@ -134,7 +134,6 @@ Además, públicos:
 **Despliegue**
 - **Hacer el primer deploy en Coolify** siguiendo [DEPLOY.md](DEPLOY.md), y configurar los backups de PostgreSQL.
 - **Decidir HSTS** (`SECURE_HSTS_INCLUDE_SUBDOMAINS` y `SECURE_HSTS_PRELOAD`) cuando esté el dominio definitivo.
-- **Cache compartido.** El throttling de login y registro se guarda en la memoria de cada proceso de gunicorn, así que el límite real se multiplica por la cantidad de procesos. Pasar a un cache compartido: Redis como recurso de Coolify, o el cache en base de datos de Django.
 
 **Auth y cuentas**
 - **Logout real.** Hoy el cliente descarta los tokens, pero el refresh sigue valiendo hasta que vence. Se resuelve con la app `token_blacklist` de SimpleJWT.
@@ -209,6 +208,10 @@ Además, públicos:
   - API: gunicorn, whitenoise, migraciones al arrancar y `HEALTHCHECK` en `/health/`.
   - Web: nginx con fallback de SPA.
 - **PostgreSQL** por `DATABASE_URL`, con SQLite en desarrollo.
+- **Cache compartido en PostgreSQL**, para que el límite de login y registro valga para todos los procesos de gunicorn.
 - **Logs de errores** a la consola.
-- **CI** con PostgreSQL y build de las dos imágenes.
+- **CI:**
+  - PostgreSQL y build de las dos imágenes.
+  - Un run por rama a la vez (`concurrency`).
+  - Se reemplazó el template `django.yml` (Python 3.7–3.9), que no podía instalar Django 6.
 - **Guía de deploy** en Coolify.
